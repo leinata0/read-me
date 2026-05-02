@@ -11,7 +11,19 @@ from app.analyzer import (
 from app.models import FileSnapshot, ProjectAnalysis, GenerateResponse
 from app.providers import AIProvider
 
-ANALYSIS_SYSTEM_PROMPT = """\
+ANALYSIS_SYSTEM_PROMPT_ZH = """\
+你是一名资深软件工程师，正在分析一个代码仓库。你的任务是提取项目的结构化信息。
+
+请准确识别以下内容：
+- 项目名称（从 package.json、pyproject.toml、setup.py 或目录名中提取）
+- 项目功能的简洁描述（用中文）
+- 使用的所有编程语言
+- 所有依赖及其分类（运行时/开发/测试）
+- 入口文件（主脚本、服务器文件、CLI 入口）
+- 关键架构模式和设计决策
+"""
+
+ANALYSIS_SYSTEM_PROMPT_EN = """\
 You are an expert software engineer analyzing a codebase. Your task is to extract structured information about the project.
 
 Be thorough and accurate. Identify:
@@ -23,7 +35,25 @@ Be thorough and accurate. Identify:
 - Key architectural patterns and design decisions
 """
 
-GENERATION_SYSTEM_PROMPT = """\
+GENERATION_SYSTEM_PROMPT_ZH = """\
+你是一名技术文档专家，正在为一个软件项目编写高质量的 README.md。
+
+要求：
+- 用中文撰写（代码块、命令、技术术语保持英文原文）
+- 写一段有吸引力的项目描述（具体针对此项目，不要泛泛而谈）
+- 包含目录
+- 安装章节：使用项目语言/生态系统的精确命令
+- 使用章节：提供可运行的代码示例
+- 依赖章节：列出关键运行时依赖
+- 简要架构概述
+- 检测到 License 时添加许可证章节
+- 添加适合该语言/生态系统的 badge
+- 如果发现了已有的 README，保留其中未涵盖的重要内容
+- 使用规范的 Markdown 格式：标题、代码块、链接
+- 输出应是生产级别的，而非模板
+"""
+
+GENERATION_SYSTEM_PROMPT_EN = """\
 You are a technical writer creating a high-quality README.md for a software project.
 
 Requirements:
@@ -121,14 +151,15 @@ async def analyze_project(
     snapshots: list[FileSnapshot],
     existing_readme: str | None,
     on_progress: Callable[[str], Awaitable[None]],
+    language: str = "zh",
 ) -> ProjectAnalysis:
     project_hash = compute_project_hash(snapshots)
     cached = _analysis_cache.get(project_hash)
     if cached and (time.time() - cached[1]) < CACHE_TTL:
-        await on_progress("Using cached analysis...")
+        await on_progress("使用缓存的分析结果...")
         return cached[0]
 
-    await on_progress("Analyzing project structure...")
+    await on_progress("正在分析项目结构...")
 
     total_tokens = estimate_total_tokens(snapshots)
     if total_tokens > 300_000:
@@ -136,8 +167,9 @@ async def analyze_project(
 
     user_prompt = build_analysis_prompt(snapshots, existing_readme)
     schema = _get_project_analysis_schema()
+    system_prompt = ANALYSIS_SYSTEM_PROMPT_ZH if language == "zh" else ANALYSIS_SYSTEM_PROMPT_EN
 
-    result = await provider.analyze(ANALYSIS_SYSTEM_PROMPT, user_prompt, schema)
+    result = await provider.analyze(system_prompt, user_prompt, schema)
     analysis = ProjectAnalysis(**result)
     analysis.existing_readme = existing_readme
 
@@ -151,11 +183,13 @@ async def generate_readme(
     snapshots: list[FileSnapshot],
     on_progress: Callable[[str], Awaitable[None]],
     on_chunk: Callable[[str], Awaitable[None]],
+    language: str = "zh",
 ) -> str:
-    await on_progress("Generating README...")
+    await on_progress("正在生成 README...")
 
     user_prompt = build_readme_prompt(analysis, snapshots)
-    return await provider.generate_stream(GENERATION_SYSTEM_PROMPT, user_prompt, on_chunk)
+    system_prompt = GENERATION_SYSTEM_PROMPT_ZH if language == "zh" else GENERATION_SYSTEM_PROMPT_EN
+    return await provider.generate_stream(system_prompt, user_prompt, on_chunk)
 
 
 async def run_pipeline(
@@ -163,22 +197,23 @@ async def run_pipeline(
     provider: AIProvider,
     on_progress: Callable[[str], Awaitable[None]],
     on_chunk: Callable[[str], Awaitable[None]],
+    language: str = "zh",
 ) -> GenerateResponse:
-    await on_progress("Validating project path...")
+    await on_progress("正在校验项目路径...")
     resolved = validate_path(folder_path)
 
-    await on_progress("Reading project files...")
+    await on_progress("正在读取项目文件...")
     gitignore = load_gitignore_patterns(resolved)
     snapshots, existing_readme = traverse_project(resolved, gitignore)
 
     if not snapshots:
-        raise ValueError("No source files found in this project. Ensure the folder contains code files.")
+        raise ValueError("项目中未找到源代码文件，请确保文件夹中包含代码文件。")
 
-    await on_progress(f"Found {len(snapshots)} source files. Analyzing...")
+    await on_progress(f"找到 {len(snapshots)} 个源文件，正在分析...")
 
-    analysis = await analyze_project(provider, snapshots, existing_readme, on_progress)
+    analysis = await analyze_project(provider, snapshots, existing_readme, on_progress, language)
 
-    readme = await generate_readme(provider, analysis, snapshots, on_progress, on_chunk)
+    readme = await generate_readme(provider, analysis, snapshots, on_progress, on_chunk, language)
 
     return GenerateResponse(
         readme=readme,

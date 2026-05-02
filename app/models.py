@@ -7,6 +7,8 @@ class ProviderKeys(BaseModel):
     """API keys and base URLs for a single provider, sent from frontend."""
     api_key: str = ""
     base_url: str = ""
+    max_tokens_analyze: int = 16384
+    max_tokens_generate: int = 32768
 
 
 class AnalyzeRequest(BaseModel):
@@ -14,6 +16,7 @@ class AnalyzeRequest(BaseModel):
     provider: str | None = None
     model: str | None = None
     api_keys: dict[str, ProviderKeys] = Field(default_factory=dict)
+    language: str = "zh"
 
 
 class ProviderInfo(BaseModel):
@@ -57,6 +60,7 @@ class ListModelsRequest(BaseModel):
 class ListModelsResponse(BaseModel):
     models: list[str]
     source: str  # "fetched" | "fallback"
+    error: str = ""
 
 
 class GenerateResponse(BaseModel):

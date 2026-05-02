@@ -2,11 +2,15 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
+import re
 from abc import ABC, abstractmethod
 from typing import Callable, Awaitable
 
 from app.models import ProviderInfo, ProviderError, ProviderKeys
+
+logger = logging.getLogger(__name__)
 
 
 class AIProvider(ABC):
@@ -18,11 +22,14 @@ class AIProvider(ABC):
     base_url_env_key: str = ""
     default_base_url: str = ""
 
-    def __init__(self, model: str | None = None, api_key: str | None = None, base_url: str | None = None):
+    def __init__(self, model: str | None = None, api_key: str | None = None, base_url: str | None = None,
+                 max_tokens_analyze: int = 16384, max_tokens_generate: int = 32768):
         key = api_key or os.environ.get(self.env_key, "")
         if not key:
             raise ProviderError(401, f"API key not configured for {self.display_name}. Set {self.env_key} or enter it in the web UI.")
         self.model = model or self.default_model
+        self.max_tokens_analyze = max_tokens_analyze
+        self.max_tokens_generate = max_tokens_generate
         base = base_url or os.environ.get(self.base_url_env_key, "") or self.default_base_url
         self._init_client(key, base)
 
@@ -54,14 +61,21 @@ class AIProvider(ABC):
 class AnthropicProvider(AIProvider):
     name = "anthropic"
     display_name = "Anthropic Claude"
-    available_models = ["mimo-v2.5[1m]", "claude-sonnet-4-6", "claude-haiku-4-5-20251001", "claude-opus-4-7"]
-    default_model = "mimo-v2.5[1m]"
+    available_models = ["claude-sonnet-4-6", "claude-haiku-4-5-20251001", "claude-opus-4-7", "mimo-v2.5-pro", "mimo-v2.5", "mimo-v2-pro"]
+    default_model = "claude-sonnet-4-6"
     env_key = "ANTHROPIC_API_KEY"
     base_url_env_key = "ANTHROPIC_BASE_URL"
     default_base_url = ""
 
     @classmethod
     async def list_models(cls, api_key: str, base_url: str = "") -> list[str]:
+        if base_url:
+            try:
+                return await _list_openai_compatible_models(api_key, base_url, "")
+            except ProviderError:
+                raise
+            except Exception as e:
+                raise ProviderError(502, f"无法从 Base URL 获取模型列表，请手动输入模型名称。({e})")
         return cls.available_models
 
     def _init_client(self, api_key: str, base_url: str) -> None:
@@ -69,21 +83,59 @@ class AnthropicProvider(AIProvider):
         kwargs = {"api_key": api_key}
         if base_url:
             kwargs["base_url"] = base_url
+            logger.info("Anthropic base_url: %s", base_url)
         self.client = AsyncAnthropic(**kwargs)
 
     async def analyze(self, system_prompt: str, user_prompt: str, json_schema: dict) -> dict:
         try:
+            logger.info("Anthropic analyze: model=%s", self.model)
+            schema_str = json.dumps(json_schema, ensure_ascii=False)
+            full_system = (
+                system_prompt + "\n\n"
+                "IMPORTANT: You MUST respond with a single valid JSON object matching this schema:\n"
+                f"{schema_str}\n"
+                "Respond ONLY with the JSON object. No markdown, no explanation, no code fences."
+            )
             response = await self.client.messages.create(
                 model=self.model,
-                max_tokens=8192,
-                system=system_prompt,
+                max_tokens=self.max_tokens_analyze,
+                system=full_system,
                 messages=[{"role": "user", "content": user_prompt}],
             )
             text = ""
+            thinking_text = ""
             for block in response.content:
                 if block.type == "text":
                     text += block.text
-            return json.loads(text) if text else {}
+                elif block.type == "thinking":
+                    thinking_text += block.thinking
+            if not text and thinking_text:
+                logger.info("No text blocks, falling back to thinking content for JSON extraction")
+                text = thinking_text
+
+            # Try to parse; if it fails, retry by showing the model what it returned
+            try:
+                return _extract_json(text)
+            except json.JSONDecodeError:
+                logger.warning("First attempt not JSON, retrying with correction...")
+                retry_response = await self.client.messages.create(
+                    model=self.model,
+                    max_tokens=self.max_tokens_analyze,
+                    system="You must respond with ONLY a valid JSON object. No markdown, no text, no explanation.",
+                    messages=[
+                        {"role": "user", "content": f"Your previous response was not valid JSON:\n\n{text[:3000]}\n\nPlease redo it as a single valid JSON object matching the schema. Output ONLY the JSON."},
+                    ],
+                )
+                retry_text = ""
+                for block in retry_response.content:
+                    if block.type == "text":
+                        retry_text += block.text
+                    elif block.type == "thinking":
+                        retry_text += block.thinking
+                return _extract_json(retry_text)
+        except json.JSONDecodeError:
+            logger.error("Failed to parse JSON after retry. text=%s...", text[:500] if text else "(empty)")
+            raise ProviderError(500, f"Model returned non-JSON response. Response start: {text[:300] if text else '(empty)'}")
         except Exception as e:
             raise _map_anthropic_error(e)
 
@@ -97,7 +149,7 @@ class AnthropicProvider(AIProvider):
             full_text = ""
             async with self.client.messages.stream(
                 model=self.model,
-                max_tokens=16384,
+                max_tokens=self.max_tokens_generate,
                 system=system_prompt,
                 messages=[{"role": "user", "content": user_prompt}],
             ) as stream:
@@ -139,7 +191,7 @@ class OpenAIProvider(AIProvider):
             )
             response = await self.client.chat.completions.create(
                 model=self.model,
-                max_tokens=8192,
+                max_tokens=self.max_tokens_analyze,
                 response_format={"type": "json_object"},
                 messages=[
                     {"role": "system", "content": system_prompt},
@@ -147,7 +199,7 @@ class OpenAIProvider(AIProvider):
                 ],
             )
             text = response.choices[0].message.content or "{}"
-            return json.loads(text)
+            return _extract_json(text)
         except Exception as e:
             raise _map_openai_error(e)
 
@@ -161,7 +213,7 @@ class OpenAIProvider(AIProvider):
             full_text = ""
             stream = await self.client.chat.completions.create(
                 model=self.model,
-                max_tokens=16384,
+                max_tokens=self.max_tokens_generate,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
@@ -223,11 +275,11 @@ class GeminiProvider(AIProvider):
                 contents=prompt,
                 config=self._types.GenerateContentConfig(
                     response_mime_type="application/json",
-                    max_output_tokens=8192,
+                    max_output_tokens=self.max_tokens_analyze,
                 ),
             )
             text = response.text or "{}"
-            return json.loads(text)
+            return _extract_json(text)
         except Exception as e:
             raise _map_generic_error(e, "Gemini")
 
@@ -243,7 +295,7 @@ class GeminiProvider(AIProvider):
             response = await self.genai_client.aio.models.generate_content_stream(
                 model=self.model,
                 contents=prompt,
-                config=self._types.GenerateContentConfig(max_output_tokens=16384),
+                config=self._types.GenerateContentConfig(max_output_tokens=self.max_tokens_generate),
             )
             async for chunk in response:
                 if chunk.text:
@@ -281,7 +333,7 @@ class DeepSeekProvider(AIProvider):
             )
             response = await self.client.chat.completions.create(
                 model=self.model,
-                max_tokens=8192,
+                max_tokens=self.max_tokens_analyze,
                 response_format={"type": "json_object"},
                 messages=[
                     {"role": "system", "content": system_prompt},
@@ -289,7 +341,7 @@ class DeepSeekProvider(AIProvider):
                 ],
             )
             text = response.choices[0].message.content or "{}"
-            return json.loads(text)
+            return _extract_json(text)
         except Exception as e:
             raise _map_openai_error(e)
 
@@ -303,7 +355,7 @@ class DeepSeekProvider(AIProvider):
             full_text = ""
             stream = await self.client.chat.completions.create(
                 model=self.model,
-                max_tokens=16384,
+                max_tokens=self.max_tokens_generate,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
@@ -357,7 +409,7 @@ class OpenRouterProvider(AIProvider):
             )
             response = await self.client.chat.completions.create(
                 model=self.model,
-                max_tokens=8192,
+                max_tokens=self.max_tokens_analyze,
                 response_format={"type": "json_object"},
                 messages=[
                     {"role": "system", "content": system_prompt},
@@ -365,7 +417,7 @@ class OpenRouterProvider(AIProvider):
                 ],
             )
             text = response.choices[0].message.content or "{}"
-            return json.loads(text)
+            return _extract_json(text)
         except Exception as e:
             raise _map_openai_error(e)
 
@@ -379,7 +431,7 @@ class OpenRouterProvider(AIProvider):
             full_text = ""
             stream = await self.client.chat.completions.create(
                 model=self.model,
-                max_tokens=16384,
+                max_tokens=self.max_tokens_generate,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
@@ -402,8 +454,10 @@ async def _list_openai_compatible_models(api_key: str, base_url: str, default_ba
     headers = {"Authorization": f"Bearer {api_key}"}
     async with httpx.AsyncClient(timeout=15) as client:
         resp = await client.get(url, headers=headers)
+        if resp.status_code == 404:
+            raise ProviderError(404, "该 API 不支持模型列表查询，请手动输入模型名称")
         if resp.status_code != 200:
-            raise ProviderError(resp.status_code, f"Failed to fetch models: {resp.text[:200]}")
+            raise ProviderError(resp.status_code, f"获取模型列表失败 (HTTP {resp.status_code})")
         data = resp.json()
         models = sorted(m["id"] for m in data.get("data", []) if m.get("id"))
         return models
@@ -440,11 +494,56 @@ def get_provider(provider_name: str, model: str | None = None, api_keys: dict[st
     keys = (api_keys or {}).get(provider_name)
     api_key = keys.api_key if keys and keys.api_key else None
     base_url = keys.base_url if keys and keys.base_url else None
+    max_analyze = keys.max_tokens_analyze if keys else 16384
+    max_generate = keys.max_tokens_generate if keys else 32768
 
-    return cls(model=model, api_key=api_key, base_url=base_url)
+    return cls(model=model, api_key=api_key, base_url=base_url,
+               max_tokens_analyze=max_analyze, max_tokens_generate=max_generate)
 
 
-def _map_anthropic_error(e: Exception) -> ProviderError:
+def _extract_json(text: str) -> dict:
+    """Extract JSON from model response, handling markdown-wrapped responses."""
+    if not text or not text.strip():
+        return {}
+
+    # 1. Try direct parse
+    text = text.strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    # 2. Try extracting from ```json ... ``` code blocks
+    code_blocks = re.findall(r'```(?:json)?\s*\n?(.*?)```', text, re.DOTALL)
+    for block in code_blocks:
+        try:
+            return json.loads(block.strip())
+        except json.JSONDecodeError:
+            continue
+
+    # 3. Try finding the outermost { ... } or [ ... ]
+    for opener, closer in [('{', '}'), ('[', ']')]:
+        start = text.find(opener)
+        if start < 0:
+            continue
+        depth = 0
+        end = -1
+        for i in range(start, len(text)):
+            if text[i] == opener:
+                depth += 1
+            elif text[i] == closer:
+                depth -= 1
+                if depth == 0:
+                    end = i + 1
+                    break
+        if end > start:
+            try:
+                return json.loads(text[start:end])
+            except json.JSONDecodeError:
+                continue
+
+    raise json.JSONDecodeError("No valid JSON found in response", text, 0)
+    logger.error("Anthropic raw error: %s", repr(e))
     try:
         from anthropic import AuthenticationError, RateLimitError, BadRequestError, APIConnectionError
         if isinstance(e, AuthenticationError):

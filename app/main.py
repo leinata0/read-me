@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 from pathlib import Path
 from typing import AsyncGenerator
@@ -17,6 +18,7 @@ from app.providers import get_provider, list_providers, PROVIDERS
 from app.generator import run_pipeline
 
 load_dotenv()
+logging.basicConfig(level=logging.INFO)
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -54,8 +56,10 @@ async def api_list_models(provider_name: str, req: ListModelsRequest):
     try:
         models = await cls.list_models(req.api_key, req.base_url)
         return ListModelsResponse(models=models, source="fetched")
-    except Exception:
-        return ListModelsResponse(models=cls.available_models, source="fallback")
+    except ProviderError as e:
+        return ListModelsResponse(models=cls.available_models, source="fallback", error=f"[{e.code}] {e.message}")
+    except Exception as e:
+        return ListModelsResponse(models=cls.available_models, source="fallback", error=str(e)[:200])
 
 
 @app.post("/api/analyze")
@@ -78,11 +82,17 @@ async def api_analyze(req: AnalyzeRequest):
                 provider=provider,
                 on_progress=on_progress,
                 on_chunk=on_chunk,
+                language=req.language,
             )
             done_data = json.dumps({"model": result.model, "provider": result.provider}, ensure_ascii=False)
             await queue.put(f"event: done\ndata: {done_data}\n\n")
         except ProviderError as e:
-            err = json.dumps({"code": e.code, "message": e.message}, ensure_ascii=False)
+            detail = e.message
+            detail += f" (渠道: {req.provider}, 模型: {req.model or '默认'})"
+            keys = (req.api_keys or {}).get(req.provider or "")
+            if keys and keys.base_url:
+                detail += f", Base URL: {keys.base_url}"
+            err = json.dumps({"code": e.code, "message": detail}, ensure_ascii=False)
             await queue.put(f"event: error\ndata: {err}\n\n")
         except (FileNotFoundError, ValueError) as e:
             err = json.dumps({"code": 404, "message": str(e)}, ensure_ascii=False)

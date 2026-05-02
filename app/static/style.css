@@ -113,9 +113,182 @@
     text-align: center;
 }
 
-#progress-text {
+/* --- Pipeline Steps --- */
+.pipeline-steps {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    max-width: 400px;
+    margin: 0 auto 1rem;
+    text-align: left;
+}
+
+.pipeline-step {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    position: relative;
+    padding-bottom: 1.25rem;
+}
+
+.pipeline-step:last-child {
+    padding-bottom: 0;
+}
+
+/* 连接线 */
+.pipeline-step:not(:last-child)::after {
+    content: '';
+    position: absolute;
+    left: 11px;
+    top: 24px;
+    bottom: 0;
+    width: 2px;
+    background: var(--pico-muted-border-color);
+    transition: background 0.3s;
+}
+
+.pipeline-step.done:not(:last-child)::after {
+    background: #27ae60;
+}
+
+/* 圆形图标 */
+.step-icon {
+    width: 24px;
+    height: 24px;
+    min-width: 24px;
+    border-radius: 50%;
+    border: 2px solid var(--pico-muted-border-color);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.3s;
+    margin-top: 1px;
+    background: var(--pico-background-color);
+}
+
+.step-icon span {
+    display: block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: transparent;
+    transition: all 0.3s;
+}
+
+/* active 状态 */
+.pipeline-step.active .step-icon {
+    border-color: var(--pico-primary);
+    box-shadow: 0 0 0 4px rgba(0, 128, 128, 0.15);
+    animation: step-pulse 1.5s ease-in-out infinite;
+}
+
+.pipeline-step.active .step-icon span {
+    background: var(--pico-primary);
+    animation: dot-pulse 1s ease-in-out infinite;
+}
+
+@keyframes step-pulse {
+    0%, 100% { box-shadow: 0 0 0 4px rgba(0, 128, 128, 0.15); }
+    50% { box-shadow: 0 0 0 8px rgba(0, 128, 128, 0.08); }
+}
+
+@keyframes dot-pulse {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(0.6); opacity: 0.5; }
+}
+
+/* done 状态 */
+.pipeline-step.done .step-icon {
+    border-color: #27ae60;
+    background: #27ae60;
+}
+
+.pipeline-step.done .step-icon span {
+    width: 0;
+    height: 0;
+    border-radius: 0;
+    background: transparent;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-bottom: 5px solid transparent;
+    /* 用 SVG 对勾替代 */
+    background: none;
+    position: relative;
+}
+
+.pipeline-step.done .step-icon span::after {
+    content: '✓';
+    color: white;
+    font-size: 13px;
+    font-weight: 700;
+    position: absolute;
+    top: -8px;
+    left: -3px;
+}
+
+/* error 状态 */
+.pipeline-step.error .step-icon {
+    border-color: #e74c3c;
+    background: #e74c3c;
+}
+
+.pipeline-step.error .step-icon span::after {
+    content: '✕';
+    color: white;
+    font-size: 11px;
+    font-weight: 700;
+    position: absolute;
+    top: -7px;
+    left: -2px;
+}
+
+/* 文字 */
+.step-info {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    padding-top: 1px;
+}
+
+.step-label {
+    font-size: 0.9rem;
+    font-weight: 500;
     color: var(--pico-muted-color);
-    margin-top: 0.5rem;
+    transition: color 0.3s;
+}
+
+.pipeline-step.active .step-label {
+    color: var(--pico-primary);
+    font-weight: 600;
+}
+
+.pipeline-step.done .step-label {
+    color: #27ae60;
+}
+
+.pipeline-step.error .step-label {
+    color: #e74c3c;
+}
+
+.step-detail {
+    font-size: 0.78rem;
+    color: var(--pico-muted-color);
+    opacity: 0.8;
+}
+
+/* --- Stream Stats --- */
+.stream-stats {
+    display: flex;
+    justify-content: center;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+    font-size: 0.8rem;
+    color: var(--pico-muted-color);
+    font-variant-numeric: tabular-nums;
+}
+
+.stat-sep {
+    opacity: 0.3;
 }
 
 #generate-btn:disabled,
@@ -171,6 +344,35 @@ hgroup p {
 dialog article {
     max-width: 600px;
     width: 100%;
+}
+
+.settings-group {
+    margin-bottom: 1rem;
+}
+
+.settings-group-title {
+    font-size: 0.9rem;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+    padding-bottom: 0.3rem;
+    border-bottom: 1px solid var(--pico-muted-border-color);
+}
+
+.settings-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 0.75rem;
+}
+
+.settings-grid label {
+    font-size: 0.8rem;
+    margin-bottom: 0.15rem;
+}
+
+.settings-grid input,
+.settings-grid select {
+    font-size: 0.85rem;
+    margin-bottom: 0;
 }
 
 .provider-key-card {

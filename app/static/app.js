@@ -7,6 +7,7 @@
     const LS_KEYS = 'readme-gen-keys';
     const LS_PROVIDER = 'readme-gen-provider';
     const LS_MODEL = 'readme-gen-model';
+    const LS_SETTINGS = 'readme-gen-settings';
 
     // --- DOM ---
     const form = document.getElementById('analyze-form');
@@ -17,8 +18,11 @@
     const refreshModelsBtn = document.getElementById('refresh-models-btn');
     const generateBtn = document.getElementById('generate-btn');
     const progressSection = document.getElementById('progress-section');
-    const progressBar = document.getElementById('progress-bar');
-    const progressText = document.getElementById('progress-text');
+    const pipelineSteps = document.getElementById('pipeline-steps');
+    const streamStats = document.getElementById('stream-stats');
+    const statChars = document.getElementById('stat-chars');
+    const statTime = document.getElementById('stat-time');
+    const statSpeed = document.getElementById('stat-speed');
     const errorSection = document.getElementById('error-section');
     const errorMessage = document.getElementById('error-message');
     const errorDismissBtn = document.getElementById('error-dismiss-btn');
@@ -33,11 +37,106 @@
     const settingsBody = document.getElementById('settings-body');
     const settingsSaveBtn = document.getElementById('settings-save-btn');
     const settingsCloseBtn = document.getElementById('settings-close-btn');
+    const settingLanguage = document.getElementById('setting-language');
+    const settingMaxAnalyze = document.getElementById('setting-max-analyze');
+    const settingMaxGenerate = document.getElementById('setting-max-generate');
     const keyStatus = document.getElementById('key-status');
     const keyStatusText = document.getElementById('key-status-text');
 
     let currentReadme = '';
     let providersData = [];
+
+    // --- Pipeline step management ---
+    const STEP_ORDER = ['validate', 'read', 'analyze', 'generate'];
+    let currentStepIndex = -1;
+    let streamStartTime = 0;
+    let streamCharCount = 0;
+    let statsTimer = null;
+
+    function resetSteps() {
+        currentStepIndex = -1;
+        streamCharCount = 0;
+        streamStartTime = 0;
+        clearInterval(statsTimer);
+        pipelineSteps.querySelectorAll('.pipeline-step').forEach(el => {
+            el.classList.remove('active', 'done', 'error');
+            el.querySelector('.step-detail').textContent = '';
+        });
+        streamStats.style.display = 'none';
+    }
+
+    function activateStep(name) {
+        const idx = STEP_ORDER.indexOf(name);
+        if (idx < 0) return;
+        // mark previous steps done
+        for (let i = 0; i < idx; i++) {
+            const el = pipelineSteps.querySelector(`[data-step="${STEP_ORDER[i]}"]`);
+            if (el && !el.classList.contains('done') && !el.classList.contains('error')) {
+                el.classList.remove('active');
+                el.classList.add('done');
+            }
+        }
+        const el = pipelineSteps.querySelector(`[data-step="${name}"]`);
+        if (el) {
+            el.classList.remove('done', 'error');
+            el.classList.add('active');
+        }
+        currentStepIndex = idx;
+    }
+
+    function completeStep(name, detail) {
+        const el = pipelineSteps.querySelector(`[data-step="${name}"]`);
+        if (el) {
+            el.classList.remove('active');
+            el.classList.add('done');
+            if (detail) el.querySelector('.step-detail').textContent = detail;
+        }
+    }
+
+    function errorStep(name, detail) {
+        const el = pipelineSteps.querySelector(`[data-step="${name}"]`);
+        if (el) {
+            el.classList.remove('active');
+            el.classList.add('error');
+            if (detail) el.querySelector('.step-detail').textContent = detail;
+        }
+    }
+
+    function completeAllSteps() {
+        STEP_ORDER.forEach(name => {
+            const el = pipelineSteps.querySelector(`[data-step="${name}"]`);
+            if (el && !el.classList.contains('error')) {
+                el.classList.remove('active');
+                el.classList.add('done');
+            }
+        });
+        clearInterval(statsTimer);
+    }
+
+    function startStreamStats() {
+        streamStartTime = Date.now();
+        streamCharCount = 0;
+        streamStats.style.display = '';
+        updateStreamStats();
+        statsTimer = setInterval(updateStreamStats, 200);
+    }
+
+    function updateStreamStats() {
+        const elapsed = (Date.now() - streamStartTime) / 1000;
+        const speed = elapsed > 0 ? Math.round(streamCharCount / elapsed) : 0;
+        statChars.textContent = `${streamCharCount.toLocaleString()} 字符`;
+        statTime.textContent = `${elapsed.toFixed(1)}s`;
+        statSpeed.textContent = `${speed} 字符/秒`;
+    }
+
+    function mapProgressToStep(detail) {
+        const d = detail.toLowerCase();
+        if (d.includes('validat')) return 'validate';
+        if (d.includes('reading') || d.includes('found') || d.includes('source file')) return 'read';
+        if (d.includes('analyz') || d.includes('cached') || d.includes('structure')) return 'analyze';
+        if (d.includes('generat') || d.includes('readme')) return 'generate';
+        return null;
+    }
 
     // --- Marked 配置 ---
     marked.setOptions({
@@ -65,13 +164,45 @@
         localStorage.setItem(LS_KEYS, JSON.stringify(keys));
     }
 
+    function loadSettings() {
+        try {
+            return JSON.parse(localStorage.getItem(LS_SETTINGS) || '{}');
+        } catch {
+            return {};
+        }
+    }
+
+    function saveSettings(settings) {
+        localStorage.setItem(LS_SETTINGS, JSON.stringify(settings));
+    }
+
+    function applySettingsToUI() {
+        const s = loadSettings();
+        settingLanguage.value = s.language || 'zh';
+        settingMaxAnalyze.value = s.max_tokens_analyze || 16384;
+        settingMaxGenerate.value = s.max_tokens_generate || 32768;
+    }
+
+    function collectSettingsFromUI() {
+        return {
+            language: settingLanguage.value,
+            max_tokens_analyze: parseInt(settingMaxAnalyze.value) || 16384,
+            max_tokens_generate: parseInt(settingMaxGenerate.value) || 32768,
+        };
+    }
+
     function getEffectiveApiKeys() {
         const saved = loadSavedKeys();
         const result = {};
         providersData.forEach(p => {
             const local = saved[p.name] || {};
             if (local.api_key) {
-                result[p.name] = { api_key: local.api_key, base_url: local.base_url || '' };
+                result[p.name] = {
+                    api_key: local.api_key,
+                    base_url: local.base_url || '',
+                    max_tokens_analyze: local.max_tokens_analyze || 16384,
+                    max_tokens_generate: local.max_tokens_generate || 32768,
+                };
             }
         });
         return result;
@@ -88,6 +219,7 @@
     settingsBtn.addEventListener('click', () => openSettings());
 
     function openSettings() {
+        applySettingsToUI();
         const saved = loadSavedKeys();
         settingsBody.innerHTML = '';
 
@@ -121,6 +253,11 @@
     }
 
     settingsSaveBtn.addEventListener('click', () => {
+        // Save global settings
+        saveSettings(collectSettingsFromUI());
+
+        // Save provider keys with max_tokens merged in
+        const settings = collectSettingsFromUI();
         const keys = {};
         settingsBody.querySelectorAll('input[data-provider]').forEach(input => {
             const provider = input.dataset.provider;
@@ -130,7 +267,11 @@
         });
         Object.keys(keys).forEach(p => {
             if (!keys[p].api_key) delete keys[p];
-            else if (!keys[p].base_url) delete keys[p].base_url;
+            else {
+                if (!keys[p].base_url) delete keys[p].base_url;
+                keys[p].max_tokens_analyze = settings.max_tokens_analyze;
+                keys[p].max_tokens_generate = settings.max_tokens_generate;
+            }
         });
         saveKeys(keys);
         settingsDialog.close();
@@ -194,7 +335,7 @@
             modelDatalist.appendChild(opt);
         });
 
-        if (savedModel) {
+        if (savedModel && selected.available_models.includes(savedModel)) {
             modelInput.value = savedModel;
         } else {
             modelInput.value = selected.available_models[0] || '';
@@ -248,9 +389,22 @@
                 modelInput.value = data.models[0];
             }
 
-            refreshModelsBtn.title = data.source === 'fetched'
-                ? '模型列表已从 API 获取'
-                : '使用默认模型列表（获取失败）';
+            // 显示模型列表获取状态
+            const modelHint = document.getElementById('model-hint');
+            if (data.source === 'fetched') {
+                refreshModelsBtn.title = '模型列表已从 API 获取';
+                if (modelHint) modelHint.style.display = 'none';
+            } else if (data.error) {
+                refreshModelsBtn.title = '获取失败：' + data.error;
+                if (modelHint) {
+                    modelHint.style.display = '';
+                    modelHint.textContent = data.error;
+                }
+                modelInput.placeholder = '手动输入模型名称';
+            } else {
+                refreshModelsBtn.title = '使用默认模型列表';
+                if (modelHint) modelHint.style.display = 'none';
+            }
         } catch (err) {
             console.warn('获取模型列表失败:', err.message);
         } finally {
@@ -329,19 +483,20 @@
         hideError();
         previewSection.style.display = 'none';
         progressSection.style.display = '';
-        progressBar.removeAttribute('value');
-        progressText.innerHTML = '<small>启动中...</small>';
+        resetSteps();
         generateBtn.setAttribute('aria-busy', 'true');
         generateBtn.disabled = true;
         currentReadme = '';
         readmePreview.innerHTML = '';
         readmeSource.value = '';
 
+        const savedSettings = loadSettings();
         const body = {
             folder_path: folderInput.value.trim(),
             provider: providerSelect.value || null,
             model: modelInput.value.trim() || null,
             api_keys: getEffectiveApiKeys(),
+            language: savedSettings.language || 'zh',
         };
 
         try {
@@ -396,28 +551,51 @@
 
     function handleSSEEvent(type, data) {
         switch (type) {
-            case 'progress':
-                progressText.innerHTML = `<small>${escapeHtml(data.detail)}</small>`;
+            case 'progress': {
+                const stepName = mapProgressToStep(data.detail);
+                if (stepName) {
+                    // complete the previous active step
+                    if (currentStepIndex >= 0) {
+                        const prevName = STEP_ORDER[currentStepIndex];
+                        if (prevName !== stepName) {
+                            completeStep(prevName);
+                        }
+                    }
+                    activateStep(stepName);
+                    const el = pipelineSteps.querySelector(`[data-step="${stepName}"]`);
+                    if (el) el.querySelector('.step-detail').textContent = data.detail;
+                }
                 break;
+            }
 
             case 'chunk':
                 currentReadme += data.text;
+                streamCharCount += data.text.length;
                 readmePreview.innerHTML = marked.parse(currentReadme);
                 readmeSource.value = currentReadme;
                 previewSection.style.display = '';
-                progressBar.value = 90;
+                // start stats on first chunk
+                if (streamStartTime === 0) {
+                    activateStep('generate');
+                    startStreamStats();
+                }
                 break;
 
             case 'done':
-                progressBar.value = 100;
-                progressText.innerHTML = '<small>生成完成！</small>';
+                completeAllSteps();
                 readmePreview.innerHTML = marked.parse(currentReadme);
                 readmeSource.value = currentReadme;
                 break;
 
-            case 'error':
+            case 'error': {
+                // figure out which step failed
+                const msg = data.message || '';
+                if (currentStepIndex >= 0) {
+                    errorStep(STEP_ORDER[currentStepIndex], msg.slice(0, 80));
+                }
                 showError(`[${data.code}] ${data.message}`);
                 break;
+            }
         }
     }
 
