@@ -32,10 +32,12 @@
                         </select>
                     </div>
                     <div>
-                        <label for="model-select">模型</label>
-                        <select id="model-select" name="model">
-                            <option value="">默认</option>
-                        </select>
+                        <label for="model-input">模型
+                            <button type="button" id="refresh-models-btn" class="settings-icon" title="从 API 获取可用模型列表" style="display:none">&#8635;</button>
+                        </label>
+                        <input type="text" id="model-input" name="model" list="model-datalist"
+                               placeholder="输入或选择模型" autocomplete="off">
+                        <datalist id="model-datalist"></datalist>
                     </div>
                 </div>
 

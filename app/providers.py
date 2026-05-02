@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from abc import ABC, abstractmethod
@@ -45,6 +46,10 @@ class AIProvider(ABC):
     def is_configured(cls) -> bool:
         return bool(os.environ.get(cls.env_key, ""))
 
+    @classmethod
+    async def list_models(cls, api_key: str, base_url: str = "") -> list[str]:
+        raise NotImplementedError
+
 
 class AnthropicProvider(AIProvider):
     name = "anthropic"
@@ -54,6 +59,10 @@ class AnthropicProvider(AIProvider):
     env_key = "ANTHROPIC_API_KEY"
     base_url_env_key = "ANTHROPIC_BASE_URL"
     default_base_url = ""
+
+    @classmethod
+    async def list_models(cls, api_key: str, base_url: str = "") -> list[str]:
+        return cls.available_models
 
     def _init_client(self, api_key: str, base_url: str) -> None:
         from anthropic import AsyncAnthropic
@@ -108,6 +117,10 @@ class OpenAIProvider(AIProvider):
     env_key = "OPENAI_API_KEY"
     base_url_env_key = "OPENAI_BASE_URL"
     default_base_url = ""
+
+    @classmethod
+    async def list_models(cls, api_key: str, base_url: str = "") -> list[str]:
+        return await _list_openai_compatible_models(api_key, base_url, "https://api.openai.com")
 
     def _init_client(self, api_key: str, base_url: str) -> None:
         from openai import AsyncOpenAI
@@ -174,6 +187,23 @@ class GeminiProvider(AIProvider):
     base_url_env_key = ""
     default_base_url = ""
 
+    @classmethod
+    async def list_models(cls, api_key: str, base_url: str = "") -> list[str]:
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, cls._sync_list_models, api_key)
+
+    @classmethod
+    def _sync_list_models(cls, api_key: str) -> list[str]:
+        from google import genai
+        gclient = genai.Client(api_key=api_key)
+        models = []
+        for m in gclient.models.list():
+            if hasattr(m, "name"):
+                name = m.name.replace("models/", "")
+                models.append(name)
+        models.sort()
+        return models
+
     def _init_client(self, api_key: str, base_url: str) -> None:
         from google import genai
         from google.genai import types
@@ -232,6 +262,10 @@ class DeepSeekProvider(AIProvider):
     env_key = "DEEPSEEK_API_KEY"
     base_url_env_key = "DEEPSEEK_BASE_URL"
     default_base_url = "https://api.deepseek.com"
+
+    @classmethod
+    async def list_models(cls, api_key: str, base_url: str = "") -> list[str]:
+        return await _list_openai_compatible_models(api_key, base_url, cls.default_base_url)
 
     def _init_client(self, api_key: str, base_url: str) -> None:
         from openai import AsyncOpenAI
@@ -301,6 +335,10 @@ class OpenRouterProvider(AIProvider):
     base_url_env_key = ""
     default_base_url = "https://openrouter.ai/api/v1"
 
+    @classmethod
+    async def list_models(cls, api_key: str, base_url: str = "") -> list[str]:
+        return await _list_openai_compatible_models(api_key, base_url, cls.default_base_url)
+
     def _init_client(self, api_key: str, base_url: str) -> None:
         from openai import AsyncOpenAI
         self.client = AsyncOpenAI(
@@ -356,6 +394,19 @@ class OpenRouterProvider(AIProvider):
             return full_text
         except Exception as e:
             raise _map_openai_error(e)
+
+
+async def _list_openai_compatible_models(api_key: str, base_url: str, default_base_url: str) -> list[str]:
+    import httpx
+    url = (base_url or default_base_url).rstrip("/") + "/v1/models"
+    headers = {"Authorization": f"Bearer {api_key}"}
+    async with httpx.AsyncClient(timeout=15) as client:
+        resp = await client.get(url, headers=headers)
+        if resp.status_code != 200:
+            raise ProviderError(resp.status_code, f"Failed to fetch models: {resp.text[:200]}")
+        data = resp.json()
+        models = sorted(m["id"] for m in data.get("data", []) if m.get("id"))
+        return models
 
 
 PROVIDERS: dict[str, type[AIProvider]] = {

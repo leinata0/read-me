@@ -49,6 +49,16 @@ class ProjectAnalysis(BaseModel):
     existing_readme: str | None = None
 
 
+class ListModelsRequest(BaseModel):
+    api_key: str = ""
+    base_url: str = ""
+
+
+class ListModelsResponse(BaseModel):
+    models: list[str]
+    source: str  # "fetched" | "fallback"
+
+
 class GenerateResponse(BaseModel):
     readme: str
     model: str

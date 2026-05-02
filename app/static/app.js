@@ -12,7 +12,9 @@
     const form = document.getElementById('analyze-form');
     const folderInput = document.getElementById('folder-path');
     const providerSelect = document.getElementById('provider-select');
-    const modelSelect = document.getElementById('model-select');
+    const modelInput = document.getElementById('model-input');
+    const modelDatalist = document.getElementById('model-datalist');
+    const refreshModelsBtn = document.getElementById('refresh-models-btn');
     const generateBtn = document.getElementById('generate-btn');
     const progressSection = document.getElementById('progress-section');
     const progressBar = document.getElementById('progress-bar');
@@ -177,21 +179,87 @@
 
     function updateModelSelect(savedModel) {
         const selected = providersData.find(p => p.name === providerSelect.value);
-        modelSelect.innerHTML = '';
+        modelDatalist.innerHTML = '';
 
         if (!selected) {
-            modelSelect.innerHTML = '<option value="">默认</option>';
+            modelInput.value = '';
+            modelInput.placeholder = '默认';
+            refreshModelsBtn.style.display = 'none';
             return;
         }
 
         selected.available_models.forEach(m => {
             const opt = document.createElement('option');
             opt.value = m;
-            opt.textContent = m;
-            if (m === savedModel) opt.selected = true;
-            modelSelect.appendChild(opt);
+            modelDatalist.appendChild(opt);
         });
+
+        if (savedModel) {
+            modelInput.value = savedModel;
+        } else {
+            modelInput.value = selected.available_models[0] || '';
+        }
+
+        modelInput.placeholder = '输入或选择模型';
+        refreshModelsBtn.style.display = isProviderReady(selected) ? '' : 'none';
     }
+
+    // ========== 动态获取模型列表 ==========
+
+    let _refreshTimer = null;
+
+    refreshModelsBtn.addEventListener('click', async () => {
+        const providerName = providerSelect.value;
+        if (!providerName) return;
+
+        const saved = loadSavedKeys();
+        const local = saved[providerName] || {};
+        const p = providersData.find(p => p.name === providerName);
+        if (!p) return;
+
+        const apiKey = local.api_key || '';
+        if (!apiKey && !p.is_configured) return;
+
+        refreshModelsBtn.disabled = true;
+        refreshModelsBtn.innerHTML = '...';
+
+        try {
+            const res = await fetch(`/api/providers/${providerName}/models`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ api_key: apiKey, base_url: local.base_url || '' }),
+            });
+
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                console.warn('获取模型列表失败:', err.detail);
+                return;
+            }
+
+            const data = await res.json();
+            modelDatalist.innerHTML = '';
+            data.models.forEach(m => {
+                const opt = document.createElement('option');
+                opt.value = m;
+                modelDatalist.appendChild(opt);
+            });
+
+            if (!modelInput.value && data.models.length > 0) {
+                modelInput.value = data.models[0];
+            }
+
+            refreshModelsBtn.title = data.source === 'fetched'
+                ? '模型列表已从 API 获取'
+                : '使用默认模型列表（获取失败）';
+        } catch (err) {
+            console.warn('获取模型列表失败:', err.message);
+        } finally {
+            refreshModelsBtn.disabled = false;
+            refreshModelsBtn.innerHTML = '&#8635;';
+        }
+    });
+
+    // ========== Key 状态 ==========
 
     function updateKeyStatus() {
         const p = providersData.find(p => p.name === providerSelect.value);
@@ -218,8 +286,15 @@
         localStorage.setItem(LS_PROVIDER, providerSelect.value);
     });
 
-    modelSelect.addEventListener('change', () => {
-        localStorage.setItem(LS_MODEL, modelSelect.value);
+    modelInput.addEventListener('change', () => {
+        localStorage.setItem(LS_MODEL, modelInput.value.trim());
+    });
+
+    modelInput.addEventListener('input', () => {
+        clearTimeout(_refreshTimer);
+        _refreshTimer = setTimeout(() => {
+            localStorage.setItem(LS_MODEL, modelInput.value.trim());
+        }, 500);
     });
 
     // ========== 标签页切换 ==========
@@ -265,7 +340,7 @@
         const body = {
             folder_path: folderInput.value.trim(),
             provider: providerSelect.value || null,
-            model: modelSelect.value || null,
+            model: modelInput.value.trim() || null,
             api_keys: getEffectiveApiKeys(),
         };
 

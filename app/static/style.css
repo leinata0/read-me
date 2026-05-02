@@ -156,6 +156,11 @@ hgroup p {
     opacity: 1;
 }
 
+.settings-icon:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
 /* --- Key status line --- */
 .key-status {
     margin-top: -0.5rem;

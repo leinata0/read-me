@@ -8,12 +8,12 @@ from typing import AsyncGenerator
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, StreamingResponse, Response
+from fastapi.responses import HTMLResponse, StreamingResponse, Response, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from app.models import AnalyzeRequest, ProviderError
-from app.providers import get_provider, list_providers
+from app.models import AnalyzeRequest, ProviderError, ListModelsRequest, ListModelsResponse
+from app.providers import get_provider, list_providers, PROVIDERS
 from app.generator import run_pipeline
 
 load_dotenv()
@@ -22,18 +22,40 @@ BASE_DIR = Path(__file__).resolve().parent
 
 app = FastAPI(title="README Generator")
 
+
+@app.exception_handler(ProviderError)
+async def provider_error_handler(request: Request, exc: ProviderError):
+    return JSONResponse(status_code=exc.code, content={"detail": exc.message})
+
+
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
+    return templates.TemplateResponse(request, "index.html")
 
 
 @app.get("/api/providers")
 async def api_providers():
     return [p.model_dump() for p in list_providers()]
+
+
+@app.post("/api/providers/{provider_name}/models", response_model=ListModelsResponse)
+async def api_list_models(provider_name: str, req: ListModelsRequest):
+    cls = PROVIDERS.get(provider_name)
+    if not cls:
+        raise ProviderError(400, f"Unknown provider: {provider_name}")
+
+    if not req.api_key:
+        return ListModelsResponse(models=cls.available_models, source="fallback")
+
+    try:
+        models = await cls.list_models(req.api_key, req.base_url)
+        return ListModelsResponse(models=models, source="fetched")
+    except Exception:
+        return ListModelsResponse(models=cls.available_models, source="fallback")
 
 
 @app.post("/api/analyze")
