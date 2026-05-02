@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>README 生成器</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/styles/github.min.css">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <main class="container">
+        <hgroup>
+            <h1>README 生成器</h1>
+            <p>AI 驱动的 README.md 自动生成工具，适用于任何项目</p>
+        </hgroup>
+
+        <!-- 输入区 -->
+        <section id="input-section">
+            <form id="analyze-form">
+                <label for="folder-path">项目文件夹路径</label>
+                <input type="text" id="folder-path" name="folder_path"
+                       placeholder="C:\Users\...\my-project 或 /home/user/my-project" required>
+
+                <div class="grid">
+                    <div>
+                        <label for="provider-select">AI 渠道
+                            <button type="button" id="settings-btn" class="settings-icon" title="配置 API Key">&#9881;</button>
+                        </label>
+                        <select id="provider-select" name="provider">
+                            <option value="">加载中...</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="model-select">模型</label>
+                        <select id="model-select" name="model">
+                            <option value="">默认</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Key 状态提示 -->
+                <div id="key-status" class="key-status" style="display:none">
+                    <small id="key-status-text"></small>
+                </div>
+
+                <button type="submit" id="generate-btn" class="contrast">生成 README</button>
+            </form>
+        </section>
+
+        <!-- 进度区 -->
+        <section id="progress-section" style="display:none">
+            <progress id="progress-bar"></progress>
+            <p id="progress-text"><small>启动中...</small></p>
+        </section>
+
+        <!-- 错误区 -->
+        <article id="error-section" style="display:none" class="error-card">
+            <header>错误</header>
+            <p id="error-message"></p>
+            <footer><button id="error-dismiss-btn" class="secondary outline">关闭</button></footer>
+        </article>
+
+        <!-- 预览区 -->
+        <section id="preview-section" style="display:none">
+            <article>
+                <header>
+                    <div class="tabs">
+                        <button class="tab-btn active" data-tab="preview">预览</button>
+                        <button class="tab-btn" data-tab="source">Markdown 源码</button>
+                    </div>
+                </header>
+
+                <div id="tab-preview" class="tab-content active">
+                    <div id="readme-preview" class="readme-body"></div>
+                </div>
+
+                <div id="tab-source" class="tab-content">
+                    <textarea id="readme-source" rows="30" spellcheck="false"></textarea>
+                </div>
+
+                <footer>
+                    <div class="grid">
+                        <button id="download-btn" class="contrast">下载 README.md</button>
+                        <button id="regenerate-btn" class="secondary outline">重新生成</button>
+                    </div>
+                </footer>
+            </article>
+        </section>
+    </main>
+
+    <!-- 设置弹窗 -->
+    <dialog id="settings-dialog">
+        <article>
+            <header>
+                <h3>API Key 配置</h3>
+            </header>
+            <div id="settings-body">
+                <!-- 动态生成 -->
+            </div>
+            <footer>
+                <div class="grid">
+                    <button id="settings-save-btn" class="contrast">保存</button>
+                    <button id="settings-close-btn" class="secondary outline">取消</button>
+                </div>
+            </footer>
+        </article>
+    </dialog>
+
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/highlight.min.js"></script>
+    <script src="/static/app.js"></script>
+</body>
+</html>
