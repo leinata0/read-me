@@ -375,6 +375,72 @@ dialog article {
     margin-bottom: 0;
 }
 
+@media (max-width: 600px) {
+    .settings-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+.settings-grid-4 {
+    grid-template-columns: 1fr 1fr 1fr 1fr;
+}
+
+.checkbox-wrap {
+    display: flex;
+    align-items: flex-end;
+    padding-bottom: 0.15rem;
+}
+
+.checkbox-wrap label {
+    font-size: 0.85rem;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    cursor: pointer;
+    margin-bottom: 0;
+}
+
+input[type="range"] {
+    margin-bottom: 0;
+    accent-color: var(--pico-primary);
+}
+
+details.settings-group {
+    border: 1px solid var(--pico-muted-border-color);
+    border-radius: var(--pico-border-radius);
+    padding: 0.5rem 0.75rem;
+    margin-bottom: 0.75rem;
+}
+
+details.settings-group summary {
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 0.9rem;
+    list-style: none;
+}
+
+details.settings-group summary::-webkit-details-marker {
+    display: none;
+}
+
+details.settings-group summary::before {
+    content: "\25B6";
+    font-size: 0.7rem;
+    margin-right: 0.5rem;
+    transition: transform 0.15s;
+    display: inline-block;
+}
+
+details.settings-group[open] summary::before {
+    transform: rotate(90deg);
+}
+
+@media (max-width: 600px) {
+    .settings-grid-4 {
+        grid-template-columns: 1fr 1fr;
+    }
+}
+
 .provider-key-card {
     margin-bottom: 0.5rem;
 }

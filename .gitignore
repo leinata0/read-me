@@ -1,8 +1,36 @@
+# Environment
 .env
+.env.local
+.env.production
+
+# Python
 __pycache__/
 *.pyc
+*.pyo
 .venv/
 venv/
 *.egg-info/
 dist/
 build/
+
+# Testing
+.coverage
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Claude Code
+.claude/

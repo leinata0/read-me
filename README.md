@@ -4,19 +4,23 @@ AI 驱动的 README.md 自动生成工具。输入本地项目文件夹路径，
 
 ## 功能特性
 
-- **多渠道 AI 支持**：Anthropic Claude、OpenAI、Google Gemini、DeepSeek、OpenRouter
+- **11 个 AI 渠道**：Anthropic、OpenAI、Gemini、DeepSeek、OpenRouter、Groq、Ollama、Moonshot、SiliconFlow、Together AI、DashScope
+- **中英双语生成**：默认中文，可切换英文
+- **丰富的生成控制**：温度、语气风格、自定义章节、Badge 开关、自定义 Prompt
 - **智能项目遍历**：自动识别 .gitignore，跳过二进制文件和常见忽略目录
 - **两步 AI 管线**：先结构化分析，再高质量文案生成
+- **流式进度图**：分步状态指示器 + 实时字符/速度统计
 - **实时流式预览**：在浏览器中实时观看 README 生成过程
 - **编辑后再下载**：生成后可编辑 Markdown，满意后再保存
 - **大项目支持**：自动分块和优先级排序，适配数百文件的项目
 - **网页配置 API Key**：无需改代码，在网页中直接填入并保存到本地
+- **本地模型支持**：通过 Ollama 使用本地部署的模型，无需 API Key
 
 ## 安装
 
 ```bash
 # 克隆仓库
-git clone https://github.com/<your-username>/read-me.git
+git clone https://github.com/leinata0/read-me.git
 cd read-me
 
 # 创建虚拟环境（推荐）
@@ -34,20 +38,34 @@ pip install -r requirements.txt
 
 ### 方式一：网页配置（推荐）
 
-启动服务后，在网页界面点击 AI 渠道旁的齿轮图标，填入 API Key 和 Base URL（可选），保存到浏览器本地存储。
+启动服务后，在网页界面点击 AI 渠道旁的齿轮图标，可以配置：
+
+- **基本设置**：语言、语气风格、温度、Badge 开关
+- **高级设置**：分析/生成 max_tokens、自定义章节、排除章节、自定义 Prompt
+- **API Key 配置**：每个渠道的 API Key 和 Base URL
 
 ### 方式二：环境变量
 
-复制 `.env` 文件并填入至少一个 API Key：
+复制 `.env.example` 为 `.env` 并填入至少一个 API Key：
 
 ```bash
-ANTHROPIC_API_KEY=sk-ant-...
-ANTHROPIC_BASE_URL=https://your-proxy.example.com   # 可选
-OPENAI_API_KEY=sk-...
-GOOGLE_API_KEY=AIza...
-DEEPSEEK_API_KEY=sk-...
-OPENROUTER_API_KEY=sk-or-...
+cp .env.example .env
 ```
+
+支持的环境变量：
+
+| 变量 | 渠道 |
+|---|---|
+| `ANTHROPIC_API_KEY` | Anthropic Claude |
+| `OPENAI_API_KEY` | OpenAI |
+| `GOOGLE_API_KEY` | Google Gemini |
+| `DEEPSEEK_API_KEY` | DeepSeek |
+| `OPENROUTER_API_KEY` | OpenRouter |
+| `GROQ_API_KEY` | Groq |
+| `MOONSHOT_API_KEY` | Moonshot (月之暗面) |
+| `SILICONFLOW_API_KEY` | SiliconFlow (硅基流动) |
+| `TOGETHER_API_KEY` | Together AI |
+| `DASHSCOPE_API_KEY` | DashScope (通义千问) |
 
 ## 使用
 
@@ -60,16 +78,17 @@ uvicorn app.main:app --reload --port 8000
 
 1. 输入项目文件夹路径
 2. 选择 AI 渠道和模型
-3. 点击「生成 README」
-4. 预览、编辑、下载
+3. 调整生成设置（语言、语气、温度等）
+4. 点击「生成 README」
+5. 预览、编辑、下载
 
 ## 项目架构
 
 ```
 app/
-├── main.py        # FastAPI 路由、SSE 流式端点
+├── main.py        # FastAPI 路由、SSE 流式端点、CORS
 ├── analyzer.py    # 项目遍历、路径校验、.gitignore 支持
-├── providers.py   # AI 渠道抽象层（5 个渠道）
+├── providers.py   # AI 渠道抽象层（11 个渠道）
 ├── generator.py   # 两步 AI 管线：分析 → 生成
 ├── models.py      # Pydantic 数据模型
 ├── templates/     # Jinja2 HTML 模板
@@ -84,14 +103,36 @@ AI 管线分为两步：
 
 | 渠道 | 默认模型 | 说明 |
 |---|---|---|
-| Anthropic Claude | mimo-v2.5[1m] | 支持自定义 Base URL（代理/中转） |
+| Anthropic Claude | claude-sonnet-4-6 | 支持自定义 Base URL（代理/中转） |
 | OpenAI | gpt-4o | JSON mode 支持 |
 | Google Gemini | gemini-2.5-flash | 免费额度充足 |
 | DeepSeek | deepseek-chat | 国内可直连，性价比高 |
 | OpenRouter | claude-sonnet-4-6 | 聚合平台，可切换任意模型 |
+| Groq | llama-3.3-70b-versatile | 超快推理，免费额度 |
+| Ollama | qwen2.5:7b | 本地模型，无需 API Key |
+| Moonshot | moonshot-v1-8k | 月之暗面，中文优秀 |
+| SiliconFlow | Qwen/Qwen2.5-7B-Instruct | 硅基流动，国内聚合 |
+| Together AI | llama-3.1-70B-Instruct-Turbo | 海外聚合平台 |
+| DashScope | qwen-plus | 阿里云通义千问 |
+
+## 生成控制选项
+
+| 选项 | 说明 | 默认值 |
+|---|---|---|
+| 语言 | README 输出语言（中文/English） | 中文 |
+| 语气风格 | 专业正式 / 轻松友好 / 高度技术 | 专业正式 |
+| 温度 | 控制生成随机性（0.0-2.0） | 0.7 |
+| Badge | 是否生成项目 Badge | 开启 |
+| 自定义章节 | 额外添加的章节（逗号分隔） | 无 |
+| 排除章节 | 不生成的章节 | 无 |
+| 自定义 Prompt | 在生成指令末尾追加的内容 | 无 |
 
 ## 技术栈
 
 - **后端**：FastAPI、Pydantic、uvicorn
-- **前端**：Pico CSS、marked.js、highlight.js
+- **前端**：Pico CSS、marked.js、highlight.js、DOMPurify
 - **AI SDK**：anthropic、openai、google-genai
+
+## 许可证
+
+MIT

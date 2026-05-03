@@ -40,6 +40,13 @@
     const settingLanguage = document.getElementById('setting-language');
     const settingMaxAnalyze = document.getElementById('setting-max-analyze');
     const settingMaxGenerate = document.getElementById('setting-max-generate');
+    const settingTone = document.getElementById('setting-tone');
+    const settingTemperature = document.getElementById('setting-temperature');
+    const tempValue = document.getElementById('temp-value');
+    const settingBadges = document.getElementById('setting-badges');
+    const settingCustomSections = document.getElementById('setting-custom-sections');
+    const settingExcludeSections = document.getElementById('setting-exclude-sections');
+    const settingCustomPrompt = document.getElementById('setting-custom-prompt');
     const keyStatus = document.getElementById('key-status');
     const keyStatusText = document.getElementById('key-status-text');
 
@@ -131,24 +138,39 @@
 
     function mapProgressToStep(detail) {
         const d = detail.toLowerCase();
+        // English
         if (d.includes('validat')) return 'validate';
         if (d.includes('reading') || d.includes('found') || d.includes('source file')) return 'read';
         if (d.includes('analyz') || d.includes('cached') || d.includes('structure')) return 'analyze';
         if (d.includes('generat') || d.includes('readme')) return 'generate';
+        // Chinese
+        if (d.includes('校验') || d.includes('路径')) return 'validate';
+        if (d.includes('读取') || d.includes('文件') || d.includes('源文件')) return 'read';
+        if (d.includes('分析') || d.includes('缓存')) return 'analyze';
+        if (d.includes('生成')) return 'generate';
         return null;
     }
 
     // --- Marked 配置 ---
-    marked.setOptions({
-        highlight: function (code, lang) {
-            if (lang && hljs.getLanguage(lang)) {
-                return hljs.highlight(code, { language: lang }).value;
-            }
-            return hljs.highlightAuto(code).value;
-        },
-        breaks: false,
-        gfm: true,
-    });
+    marked.setOptions({ breaks: false, gfm: true });
+
+    // 用 hljs renderer 覆盖 code 渲染（替代已弃用的 highlight 选项）
+    const renderer = new marked.Renderer();
+    renderer.code = function ({ text, lang }) {
+        let highlighted = text;
+        if (lang && hljs.getLanguage(lang)) {
+            highlighted = hljs.highlight(text, { language: lang }).value;
+        } else if (!lang) {
+            highlighted = hljs.highlightAuto(text).value;
+        }
+        return `<pre><code class="hljs${lang ? ' language-' + lang : ''}">${highlighted}</code></pre>`;
+    };
+    marked.use({ renderer });
+
+    // --- DOMPurify 安全渲染 ---
+    function safeRender(md) {
+        return DOMPurify.sanitize(marked.parse(md));
+    }
 
     // ========== API Key 管理 ==========
 
@@ -181,6 +203,13 @@
         settingLanguage.value = s.language || 'zh';
         settingMaxAnalyze.value = s.max_tokens_analyze || 16384;
         settingMaxGenerate.value = s.max_tokens_generate || 32768;
+        settingTone.value = s.tone || 'professional';
+        settingTemperature.value = s.temperature ?? 0.7;
+        tempValue.textContent = s.temperature ?? 0.7;
+        settingBadges.checked = s.include_badges !== false;
+        settingCustomSections.value = s.custom_sections || '';
+        settingExcludeSections.value = s.exclude_sections || '';
+        settingCustomPrompt.value = s.custom_prompt_suffix || '';
     }
 
     function collectSettingsFromUI() {
@@ -188,6 +217,12 @@
             language: settingLanguage.value,
             max_tokens_analyze: parseInt(settingMaxAnalyze.value) || 16384,
             max_tokens_generate: parseInt(settingMaxGenerate.value) || 32768,
+            tone: settingTone.value,
+            temperature: parseFloat(settingTemperature.value) || 0.7,
+            include_badges: settingBadges.checked,
+            custom_sections: settingCustomSections.value.trim(),
+            exclude_sections: settingExcludeSections.value.trim(),
+            custom_prompt_suffix: settingCustomPrompt.value.trim(),
         };
     }
 
@@ -202,6 +237,7 @@
                     base_url: local.base_url || '',
                     max_tokens_analyze: local.max_tokens_analyze || 16384,
                     max_tokens_generate: local.max_tokens_generate || 32768,
+                    temperature: local.temperature ?? 0.7,
                 };
             }
         });
@@ -211,7 +247,7 @@
     function isProviderReady(p) {
         const saved = loadSavedKeys();
         const local = saved[p.name] || {};
-        return p.is_configured || !!local.api_key;
+        return p.is_configured || !!local.api_key || !p.env_key_hint;
     }
 
     // ========== 设置弹窗 ==========
@@ -227,22 +263,23 @@
             const local = saved[p.name] || {};
             const hasEnvKey = p.is_configured;
             const hasLocalKey = !!local.api_key;
+            const esc = escapeHtml;
 
             const card = document.createElement('div');
             card.className = 'provider-key-card';
             card.innerHTML = `
                 <details ${hasLocalKey || hasEnvKey ? '' : 'open'}>
-                    <summary><strong>${p.display_name}</strong>
+                    <summary><strong>${esc(p.display_name)}</strong>
                         ${hasEnvKey ? '<span class="badge badge-env">环境变量</span>' : ''}
                         ${hasLocalKey ? '<span class="badge badge-local">本地</span>' : ''}
                     </summary>
                     <div class="form-inner">
-                        <label for="key-${p.name}">API Key</label>
-                        <input type="password" id="key-${p.name}" data-provider="${p.name}" data-field="api_key"
-                               value="${local.api_key || ''}" placeholder="${p.env_key_hint || '输入 API Key'}">
-                        <label for="base-${p.name}">Base URL <small>（可选）</small></label>
-                        <input type="text" id="base-${p.name}" data-provider="${p.name}" data-field="base_url"
-                               value="${local.base_url || ''}" placeholder="${p.base_url_hint || '默认'}">
+                        <label for="key-${esc(p.name)}">API Key</label>
+                        <input type="password" id="key-${esc(p.name)}" data-provider="${esc(p.name)}" data-field="api_key"
+                               value="${esc(local.api_key || '')}" placeholder="${esc(p.env_key_hint || '输入 API Key')}">
+                        <label for="base-${esc(p.name)}">Base URL <small>（可选）</small></label>
+                        <input type="text" id="base-${esc(p.name)}" data-provider="${esc(p.name)}" data-field="base_url"
+                               value="${esc(local.base_url || '')}" placeholder="${esc(p.base_url_hint || '默认')}">
                     </div>
                 </details>
             `;
@@ -271,6 +308,7 @@
                 if (!keys[p].base_url) delete keys[p].base_url;
                 keys[p].max_tokens_analyze = settings.max_tokens_analyze;
                 keys[p].max_tokens_generate = settings.max_tokens_generate;
+                keys[p].temperature = settings.temperature;
             }
         });
         saveKeys(keys);
@@ -451,6 +489,11 @@
         }, 500);
     });
 
+    // 温度滑块实时显示
+    settingTemperature.addEventListener('input', () => {
+        tempValue.textContent = settingTemperature.value;
+    });
+
     // ========== 标签页切换 ==========
 
     tabBtns.forEach(btn => {
@@ -497,6 +540,12 @@
             model: modelInput.value.trim() || null,
             api_keys: getEffectiveApiKeys(),
             language: savedSettings.language || 'zh',
+            temperature: savedSettings.temperature ?? 0.7,
+            tone: savedSettings.tone || 'professional',
+            custom_sections: savedSettings.custom_sections || '',
+            exclude_sections: savedSettings.exclude_sections || '',
+            include_badges: savedSettings.include_badges !== false,
+            custom_prompt_suffix: savedSettings.custom_prompt_suffix || '',
         };
 
         try {
@@ -571,7 +620,7 @@
             case 'chunk':
                 currentReadme += data.text;
                 streamCharCount += data.text.length;
-                readmePreview.innerHTML = marked.parse(currentReadme);
+                readmePreview.innerHTML = safeRender(currentReadme);
                 readmeSource.value = currentReadme;
                 previewSection.style.display = '';
                 // start stats on first chunk
@@ -583,7 +632,7 @@
 
             case 'done':
                 completeAllSteps();
-                readmePreview.innerHTML = marked.parse(currentReadme);
+                readmePreview.innerHTML = safeRender(currentReadme);
                 readmeSource.value = currentReadme;
                 break;
 
@@ -627,15 +676,16 @@
     // ========== 重新生成 ==========
 
     regenerateBtn.addEventListener('click', () => {
-        form.dispatchEvent(new Event('submit'));
+        form.requestSubmit();
     });
 
     // ========== 工具函数 ==========
 
     function escapeHtml(str) {
-        const div = document.createElement('div');
-        div.textContent = str;
-        return div.innerHTML;
+        if (!str) return '';
+        return String(str).replace(/[&<>"']/g, c => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+        })[c]);
     }
 
     // ========== 初始化 ==========

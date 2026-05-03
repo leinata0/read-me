@@ -7,6 +7,7 @@ from typing import Callable, Awaitable
 from app.analyzer import (
     validate_path, load_gitignore_patterns, traverse_project,
     estimate_total_tokens, compute_project_hash, prioritize_files,
+    ENTRY_NAMES,
 )
 from app.models import FileSnapshot, ProjectAnalysis, GenerateResponse
 from app.providers import AIProvider
@@ -72,6 +73,20 @@ Requirements:
 
 _analysis_cache: dict[str, tuple[ProjectAnalysis, float]] = {}
 CACHE_TTL = 30 * 60  # 30 minutes
+CACHE_MAX_SIZE = 50
+
+
+def _evict_expired_cache() -> None:
+    """Remove expired entries and enforce max size."""
+    now = time.time()
+    expired = [k for k, (_, ts) in _analysis_cache.items() if now - ts >= CACHE_TTL]
+    for k in expired:
+        del _analysis_cache[k]
+    # If still over max size, remove oldest entries
+    if len(_analysis_cache) > CACHE_MAX_SIZE:
+        sorted_keys = sorted(_analysis_cache, key=lambda k: _analysis_cache[k][1])
+        for k in sorted_keys[:len(_analysis_cache) - CACHE_MAX_SIZE]:
+            del _analysis_cache[k]
 
 
 def _get_project_analysis_schema() -> dict:
@@ -118,10 +133,9 @@ def build_readme_prompt(analysis: ProjectAnalysis, snapshots: list[FileSnapshot]
     parts.append(analysis_md)
 
     entry_snippets: list[FileSnapshot] = []
-    entry_names = {"main", "app", "index", "server", "cli", "run"}
     for snap in snapshots:
         stem = snap.relative_path.split("/")[-1].split("\\")[-1].rsplit(".", 1)[0].lower()
-        if stem in entry_names or snap.relative_path in analysis.entry_points:
+        if stem in ENTRY_NAMES or snap.relative_path in analysis.entry_points:
             entry_snippets.append(snap)
             if len(entry_snippets) >= 3:
                 break
@@ -153,6 +167,7 @@ async def analyze_project(
     on_progress: Callable[[str], Awaitable[None]],
     language: str = "zh",
 ) -> ProjectAnalysis:
+    _evict_expired_cache()
     project_hash = compute_project_hash(snapshots)
     cached = _analysis_cache.get(project_hash)
     if cached and (time.time() - cached[1]) < CACHE_TTL:
@@ -177,6 +192,41 @@ async def analyze_project(
     return analysis
 
 
+def _build_generation_prompt(language: str, tone: str, include_badges: bool,
+                              custom_sections: str, exclude_sections: str,
+                              custom_prompt_suffix: str) -> str:
+    base = GENERATION_SYSTEM_PROMPT_ZH if language == "zh" else GENERATION_SYSTEM_PROMPT_EN
+
+    tone_map = {
+        "professional": {"zh": "\n- 使用专业、正式的技术文档语气", "en": "\n- Use a professional, formal technical documentation tone"},
+        "casual": {"zh": "\n- 使用轻松友好的语气，适合开源社区", "en": "\n- Use a casual, friendly tone suitable for open-source communities"},
+        "technical": {"zh": "\n- 使用高度技术性的语气，面向资深开发者", "en": "\n- Use a highly technical tone targeting experienced developers"},
+    }
+    if tone in tone_map:
+        base += tone_map[tone].get(language, tone_map[tone]["en"])
+
+    if not include_badges:
+        badge_line = "- 添加适合该语言/生态系统的 badge" if language == "zh" else "- Badge suggestions appropriate for the language/ecosystem"
+        base = base.replace(badge_line, "")
+
+    if custom_sections:
+        if language == "zh":
+            base += f"\n- 请额外包含以下章节：{custom_sections}"
+        else:
+            base += f"\n- Additionally include these sections: {custom_sections}"
+
+    if exclude_sections:
+        if language == "zh":
+            base += f"\n- 请跳过以下章节：{exclude_sections}"
+        else:
+            base += f"\n- Skip these sections: {exclude_sections}"
+
+    if custom_prompt_suffix:
+        base += f"\n\n{custom_prompt_suffix}"
+
+    return base
+
+
 async def generate_readme(
     provider: AIProvider,
     analysis: ProjectAnalysis,
@@ -184,11 +234,18 @@ async def generate_readme(
     on_progress: Callable[[str], Awaitable[None]],
     on_chunk: Callable[[str], Awaitable[None]],
     language: str = "zh",
+    tone: str = "professional",
+    include_badges: bool = True,
+    custom_sections: str = "",
+    exclude_sections: str = "",
+    custom_prompt_suffix: str = "",
 ) -> str:
     await on_progress("正在生成 README...")
 
     user_prompt = build_readme_prompt(analysis, snapshots)
-    system_prompt = GENERATION_SYSTEM_PROMPT_ZH if language == "zh" else GENERATION_SYSTEM_PROMPT_EN
+    system_prompt = _build_generation_prompt(
+        language, tone, include_badges, custom_sections, exclude_sections, custom_prompt_suffix
+    )
     return await provider.generate_stream(system_prompt, user_prompt, on_chunk)
 
 
@@ -198,6 +255,11 @@ async def run_pipeline(
     on_progress: Callable[[str], Awaitable[None]],
     on_chunk: Callable[[str], Awaitable[None]],
     language: str = "zh",
+    tone: str = "professional",
+    include_badges: bool = True,
+    custom_sections: str = "",
+    exclude_sections: str = "",
+    custom_prompt_suffix: str = "",
 ) -> GenerateResponse:
     await on_progress("正在校验项目路径...")
     resolved = validate_path(folder_path)
@@ -213,7 +275,10 @@ async def run_pipeline(
 
     analysis = await analyze_project(provider, snapshots, existing_readme, on_progress, language)
 
-    readme = await generate_readme(provider, analysis, snapshots, on_progress, on_chunk, language)
+    readme = await generate_readme(
+        provider, analysis, snapshots, on_progress, on_chunk,
+        language, tone, include_badges, custom_sections, exclude_sections, custom_prompt_suffix,
+    )
 
     return GenerateResponse(
         readme=readme,

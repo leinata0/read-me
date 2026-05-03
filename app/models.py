@@ -9,6 +9,7 @@ class ProviderKeys(BaseModel):
     base_url: str = ""
     max_tokens_analyze: int = 16384
     max_tokens_generate: int = 32768
+    temperature: float = 0.7
 
 
 class AnalyzeRequest(BaseModel):
@@ -17,6 +18,12 @@ class AnalyzeRequest(BaseModel):
     model: str | None = None
     api_keys: dict[str, ProviderKeys] = Field(default_factory=dict)
     language: str = "zh"
+    temperature: float = 0.7
+    tone: str = "professional"
+    custom_sections: str = ""
+    exclude_sections: str = ""
+    include_badges: bool = True
+    custom_prompt_suffix: str = ""
 
 
 class ProviderInfo(BaseModel):
@@ -67,7 +74,6 @@ class GenerateResponse(BaseModel):
     readme: str
     model: str
     provider: str
-    tokens_used: dict = Field(default_factory=dict)
 
 
 class ProviderError(Exception):

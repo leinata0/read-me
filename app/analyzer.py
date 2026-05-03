@@ -53,12 +53,23 @@ EXT_TO_LANG: dict[str, str] = {
     ".txt": "text", ".cfg": "ini", ".ini": "ini", ".conf": "ini",
 }
 
-BLOCKED_PREFIXES: list[str] = [
-    "/etc", "/usr", "/System", "/Library",
-    "C:\\Windows", "C:\\Program Files", "C:\\Program Files (x86)",
-]
+import platform
+
+_system = platform.system()
+if _system == "Windows":
+    BLOCKED_PREFIXES: list[str] = [
+        "C:\\Windows", "C:\\Program Files", "C:\\Program Files (x86)",
+        "C:\\ProgramData",
+    ]
+else:
+    BLOCKED_PREFIXES = [
+        "/etc", "/usr", "/System", "/Library", "/boot", "/dev", "/proc", "/sys",
+    ]
 
 MAX_FILE_BYTES = 32 * 1024  # 32KB
+MAX_PATH_LENGTH = 500
+
+ENTRY_NAMES: set[str] = {"main", "app", "index", "server", "cli", "run"}
 
 
 def validate_path(folder_path: str) -> Path:
@@ -69,9 +80,15 @@ def validate_path(folder_path: str) -> Path:
     if not resolved.is_dir():
         raise ValueError(f"The specified path is not a directory: {folder_path}")
 
+    # Normalize: ensure prefix ends with separator to avoid false positives
     resolved_str = str(resolved)
+    if len(resolved_str) > MAX_PATH_LENGTH:
+        raise ValueError("Path too long.")
+
+    sep = "\\" if _system == "Windows" else "/"
     for prefix in BLOCKED_PREFIXES:
-        if resolved_str.startswith(prefix):
+        norm_prefix = prefix if prefix.endswith(sep) else prefix + sep
+        if resolved_str.startswith(norm_prefix) or resolved_str == prefix:
             raise ValueError("Invalid path. System directories are not allowed.")
 
     return resolved
@@ -170,7 +187,6 @@ def compute_project_hash(snapshots: list[FileSnapshot]) -> str:
 
 
 def prioritize_files(snapshots: list[FileSnapshot], max_tokens: int = 150_000) -> list[FileSnapshot]:
-    entry_names = {"main", "app", "index", "server", "cli", "run"}
     selected: list[FileSnapshot] = []
     used_tokens = 0
 
@@ -185,7 +201,7 @@ def prioritize_files(snapshots: list[FileSnapshot], max_tokens: int = 150_000) -
         if snap in selected:
             continue
         stem = Path(snap.relative_path).stem.lower()
-        if stem in entry_names:
+        if stem in ENTRY_NAMES:
             tokens = len(snap.content) // 4
             if used_tokens + tokens <= max_tokens:
                 selected.append(snap)

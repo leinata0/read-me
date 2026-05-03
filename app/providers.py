@@ -16,20 +16,21 @@ logger = logging.getLogger(__name__)
 class AIProvider(ABC):
     name: str = ""
     display_name: str = ""
-    available_models: list[str] = []
+    available_models: tuple[str, ...] = ()
     default_model: str = ""
     env_key: str = ""
     base_url_env_key: str = ""
     default_base_url: str = ""
 
     def __init__(self, model: str | None = None, api_key: str | None = None, base_url: str | None = None,
-                 max_tokens_analyze: int = 16384, max_tokens_generate: int = 32768):
+                 max_tokens_analyze: int = 16384, max_tokens_generate: int = 32768, temperature: float = 0.7):
         key = api_key or os.environ.get(self.env_key, "")
-        if not key:
+        if not key and self.env_key:
             raise ProviderError(401, f"API key not configured for {self.display_name}. Set {self.env_key} or enter it in the web UI.")
         self.model = model or self.default_model
         self.max_tokens_analyze = max_tokens_analyze
         self.max_tokens_generate = max_tokens_generate
+        self.temperature = temperature
         base = base_url or os.environ.get(self.base_url_env_key, "") or self.default_base_url
         self._init_client(key, base)
 
@@ -61,7 +62,7 @@ class AIProvider(ABC):
 class AnthropicProvider(AIProvider):
     name = "anthropic"
     display_name = "Anthropic Claude"
-    available_models = ["claude-sonnet-4-6", "claude-haiku-4-5-20251001", "claude-opus-4-7", "mimo-v2.5-pro", "mimo-v2.5", "mimo-v2-pro"]
+    available_models = ("claude-sonnet-4-6", "claude-haiku-4-5-20251001", "claude-opus-4-7", "mimo-v2.5-pro", "mimo-v2.5", "mimo-v2-pro")
     default_model = "claude-sonnet-4-6"
     env_key = "ANTHROPIC_API_KEY"
     base_url_env_key = "ANTHROPIC_BASE_URL"
@@ -161,18 +162,14 @@ class AnthropicProvider(AIProvider):
             raise _map_anthropic_error(e)
 
 
-class OpenAIProvider(AIProvider):
-    name = "openai"
-    display_name = "OpenAI"
-    available_models = ["gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini"]
-    default_model = "gpt-4o"
-    env_key = "OPENAI_API_KEY"
-    base_url_env_key = "OPENAI_BASE_URL"
-    default_base_url = ""
+class OpenAICompatibleProvider(AIProvider):
+    """Base class for providers using OpenAI-compatible chat/completions API."""
+
+    default_list_models_base_url: str = ""
 
     @classmethod
     async def list_models(cls, api_key: str, base_url: str = "") -> list[str]:
-        return await _list_openai_compatible_models(api_key, base_url, "https://api.openai.com")
+        return await _list_openai_compatible_models(api_key, base_url, cls.default_list_models_base_url)
 
     def _init_client(self, api_key: str, base_url: str) -> None:
         from openai import AsyncOpenAI
@@ -230,10 +227,21 @@ class OpenAIProvider(AIProvider):
             raise _map_openai_error(e)
 
 
+class OpenAIProvider(OpenAICompatibleProvider):
+    name = "openai"
+    display_name = "OpenAI"
+    available_models = ("gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini")
+    default_model = "gpt-4o"
+    env_key = "OPENAI_API_KEY"
+    base_url_env_key = "OPENAI_BASE_URL"
+    default_base_url = ""
+    default_list_models_base_url = "https://api.openai.com"
+
+
 class GeminiProvider(AIProvider):
     name = "gemini"
     display_name = "Google Gemini"
-    available_models = ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"]
+    available_models = ("gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash")
     default_model = "gemini-2.5-flash"
     env_key = "GOOGLE_API_KEY"
     base_url_env_key = ""
@@ -241,7 +249,7 @@ class GeminiProvider(AIProvider):
 
     @classmethod
     async def list_models(cls, api_key: str, base_url: str = "") -> list[str]:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, cls._sync_list_models, api_key)
 
     @classmethod
@@ -265,15 +273,16 @@ class GeminiProvider(AIProvider):
     async def analyze(self, system_prompt: str, user_prompt: str, json_schema: dict) -> dict:
         try:
             schema_str = json.dumps(json_schema, ensure_ascii=False)
-            prompt = (
-                f"{system_prompt}\n\n{user_prompt}\n\n"
+            user_prompt_full = (
+                f"{user_prompt}\n\n"
                 f"IMPORTANT: Respond with valid JSON matching this schema:\n{schema_str}\n"
                 f"Respond ONLY with the JSON object, no other text."
             )
             response = await self.genai_client.aio.models.generate_content(
                 model=self.model,
-                contents=prompt,
+                contents=user_prompt_full,
                 config=self._types.GenerateContentConfig(
+                    system_instruction=system_prompt,
                     response_mime_type="application/json",
                     max_output_tokens=self.max_tokens_analyze,
                 ),
@@ -291,11 +300,13 @@ class GeminiProvider(AIProvider):
     ) -> str:
         try:
             full_text = ""
-            prompt = f"{system_prompt}\n\n{user_prompt}"
             response = await self.genai_client.aio.models.generate_content_stream(
                 model=self.model,
-                contents=prompt,
-                config=self._types.GenerateContentConfig(max_output_tokens=self.max_tokens_generate),
+                contents=user_prompt,
+                config=self._types.GenerateContentConfig(
+                    system_instruction=system_prompt,
+                    max_output_tokens=self.max_tokens_generate,
+                ),
             )
             async for chunk in response:
                 if chunk.text:
@@ -306,90 +317,32 @@ class GeminiProvider(AIProvider):
             raise _map_generic_error(e, "Gemini")
 
 
-class DeepSeekProvider(AIProvider):
+class DeepSeekProvider(OpenAICompatibleProvider):
     name = "deepseek"
     display_name = "DeepSeek"
-    available_models = ["deepseek-chat", "deepseek-reasoner"]
+    available_models = ("deepseek-chat", "deepseek-reasoner")
     default_model = "deepseek-chat"
     env_key = "DEEPSEEK_API_KEY"
     base_url_env_key = "DEEPSEEK_BASE_URL"
     default_base_url = "https://api.deepseek.com"
-
-    @classmethod
-    async def list_models(cls, api_key: str, base_url: str = "") -> list[str]:
-        return await _list_openai_compatible_models(api_key, base_url, cls.default_base_url)
-
-    def _init_client(self, api_key: str, base_url: str) -> None:
-        from openai import AsyncOpenAI
-        self.client = AsyncOpenAI(api_key=api_key, base_url=base_url or self.default_base_url)
-
-    async def analyze(self, system_prompt: str, user_prompt: str, json_schema: dict) -> dict:
-        try:
-            schema_str = json.dumps(json_schema, ensure_ascii=False)
-            prompt = (
-                f"{user_prompt}\n\n"
-                f"IMPORTANT: Respond with valid JSON matching this schema:\n{schema_str}\n"
-                f"Respond ONLY with the JSON object, no other text."
-            )
-            response = await self.client.chat.completions.create(
-                model=self.model,
-                max_tokens=self.max_tokens_analyze,
-                response_format={"type": "json_object"},
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": prompt},
-                ],
-            )
-            text = response.choices[0].message.content or "{}"
-            return _extract_json(text)
-        except Exception as e:
-            raise _map_openai_error(e)
-
-    async def generate_stream(
-        self,
-        system_prompt: str,
-        user_prompt: str,
-        on_chunk: Callable[[str], Awaitable[None]],
-    ) -> str:
-        try:
-            full_text = ""
-            stream = await self.client.chat.completions.create(
-                model=self.model,
-                max_tokens=self.max_tokens_generate,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                stream=True,
-            )
-            async for chunk in stream:
-                delta = chunk.choices[0].delta.content
-                if delta:
-                    full_text += delta
-                    await on_chunk(delta)
-            return full_text
-        except Exception as e:
-            raise _map_openai_error(e)
+    default_list_models_base_url = "https://api.deepseek.com"
 
 
-class OpenRouterProvider(AIProvider):
+class OpenRouterProvider(OpenAICompatibleProvider):
     name = "openrouter"
     display_name = "OpenRouter"
-    available_models = [
+    available_models = (
         "anthropic/claude-sonnet-4-6",
         "anthropic/claude-haiku-4-5-20251001",
         "openai/gpt-4o",
         "google/gemini-2.5-flash",
         "deepseek/deepseek-chat",
-    ]
+    )
     default_model = "anthropic/claude-sonnet-4-6"
     env_key = "OPENROUTER_API_KEY"
     base_url_env_key = ""
     default_base_url = "https://openrouter.ai/api/v1"
-
-    @classmethod
-    async def list_models(cls, api_key: str, base_url: str = "") -> list[str]:
-        return await _list_openai_compatible_models(api_key, base_url, cls.default_base_url)
+    default_list_models_base_url = "https://openrouter.ai/api/v1"
 
     def _init_client(self, api_key: str, base_url: str) -> None:
         from openai import AsyncOpenAI
@@ -399,53 +352,71 @@ class OpenRouterProvider(AIProvider):
             default_headers={"HTTP-Referer": "http://localhost:8000", "X-Title": "README Generator"},
         )
 
-    async def analyze(self, system_prompt: str, user_prompt: str, json_schema: dict) -> dict:
-        try:
-            schema_str = json.dumps(json_schema, ensure_ascii=False)
-            prompt = (
-                f"{user_prompt}\n\n"
-                f"IMPORTANT: Respond with valid JSON matching this schema:\n{schema_str}\n"
-                f"Respond ONLY with the JSON object, no other text."
-            )
-            response = await self.client.chat.completions.create(
-                model=self.model,
-                max_tokens=self.max_tokens_analyze,
-                response_format={"type": "json_object"},
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": prompt},
-                ],
-            )
-            text = response.choices[0].message.content or "{}"
-            return _extract_json(text)
-        except Exception as e:
-            raise _map_openai_error(e)
 
-    async def generate_stream(
-        self,
-        system_prompt: str,
-        user_prompt: str,
-        on_chunk: Callable[[str], Awaitable[None]],
-    ) -> str:
-        try:
-            full_text = ""
-            stream = await self.client.chat.completions.create(
-                model=self.model,
-                max_tokens=self.max_tokens_generate,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                stream=True,
-            )
-            async for chunk in stream:
-                delta = chunk.choices[0].delta.content
-                if delta:
-                    full_text += delta
-                    await on_chunk(delta)
-            return full_text
-        except Exception as e:
-            raise _map_openai_error(e)
+class GroqProvider(OpenAICompatibleProvider):
+    name = "groq"
+    display_name = "Groq"
+    available_models = ("llama-3.3-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768")
+    default_model = "llama-3.3-70b-versatile"
+    env_key = "GROQ_API_KEY"
+    base_url_env_key = ""
+    default_base_url = "https://api.groq.com/openai/v1"
+    default_list_models_base_url = "https://api.groq.com/openai/v1"
+
+
+class OllamaProvider(OpenAICompatibleProvider):
+    name = "ollama"
+    display_name = "Ollama (本地)"
+    available_models = ("qwen2.5:7b", "llama3.1:8b", "deepseek-coder-v2:16b", "mistral:7b")
+    default_model = "qwen2.5:7b"
+    env_key = ""  # Ollama 不需要 API key
+    base_url_env_key = ""
+    default_base_url = "http://localhost:11434/v1"
+    default_list_models_base_url = "http://localhost:11434/v1"
+
+
+class MoonshotProvider(OpenAICompatibleProvider):
+    name = "moonshot"
+    display_name = "Moonshot (月之暗面)"
+    available_models = ("moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k")
+    default_model = "moonshot-v1-8k"
+    env_key = "MOONSHOT_API_KEY"
+    base_url_env_key = ""
+    default_base_url = "https://api.moonshot.cn/v1"
+    default_list_models_base_url = "https://api.moonshot.cn/v1"
+
+
+class SiliconFlowProvider(OpenAICompatibleProvider):
+    name = "siliconflow"
+    display_name = "SiliconFlow (硅基流动)"
+    available_models = ("Qwen/Qwen2.5-7B-Instruct", "deepseek-ai/DeepSeek-V3", "meta-llama/Meta-Llama-3.1-8B-Instruct")
+    default_model = "Qwen/Qwen2.5-7B-Instruct"
+    env_key = "SILICONFLOW_API_KEY"
+    base_url_env_key = ""
+    default_base_url = "https://api.siliconflow.cn/v1"
+    default_list_models_base_url = "https://api.siliconflow.cn/v1"
+
+
+class TogetherProvider(OpenAICompatibleProvider):
+    name = "together"
+    display_name = "Together AI"
+    available_models = ("meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo", "mistralai/Mixtral-8x7B-Instruct-v0.1", "Qwen/Qwen2.5-72B-Instruct-Turbo")
+    default_model = "meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo"
+    env_key = "TOGETHER_API_KEY"
+    base_url_env_key = ""
+    default_base_url = "https://api.together.xyz/v1"
+    default_list_models_base_url = "https://api.together.xyz/v1"
+
+
+class DashScopeProvider(OpenAICompatibleProvider):
+    name = "dashscope"
+    display_name = "DashScope (通义千问)"
+    available_models = ("qwen-turbo", "qwen-plus", "qwen-max", "qwen-long")
+    default_model = "qwen-plus"
+    env_key = "DASHSCOPE_API_KEY"
+    base_url_env_key = ""
+    default_base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    default_list_models_base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 
 
 async def _list_openai_compatible_models(api_key: str, base_url: str, default_base_url: str) -> list[str]:
@@ -469,6 +440,12 @@ PROVIDERS: dict[str, type[AIProvider]] = {
     "gemini": GeminiProvider,
     "deepseek": DeepSeekProvider,
     "openrouter": OpenRouterProvider,
+    "groq": GroqProvider,
+    "ollama": OllamaProvider,
+    "moonshot": MoonshotProvider,
+    "siliconflow": SiliconFlowProvider,
+    "together": TogetherProvider,
+    "dashscope": DashScopeProvider,
 }
 
 
@@ -496,9 +473,11 @@ def get_provider(provider_name: str, model: str | None = None, api_keys: dict[st
     base_url = keys.base_url if keys and keys.base_url else None
     max_analyze = keys.max_tokens_analyze if keys else 16384
     max_generate = keys.max_tokens_generate if keys else 32768
+    temperature = keys.temperature if keys else 0.7
 
     return cls(model=model, api_key=api_key, base_url=base_url,
-               max_tokens_analyze=max_analyze, max_tokens_generate=max_generate)
+               max_tokens_analyze=max_analyze, max_tokens_generate=max_generate,
+               temperature=temperature)
 
 
 def _extract_json(text: str) -> dict:
@@ -543,6 +522,9 @@ def _extract_json(text: str) -> dict:
                 continue
 
     raise json.JSONDecodeError("No valid JSON found in response", text, 0)
+
+
+def _map_anthropic_error(e: Exception) -> ProviderError:
     logger.error("Anthropic raw error: %s", repr(e))
     try:
         from anthropic import AuthenticationError, RateLimitError, BadRequestError, APIConnectionError

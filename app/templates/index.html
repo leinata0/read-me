@@ -3,12 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="AI 驱动的 README.md 自动生成工具">
     <title>README 生成器</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/styles/github.min.css">
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
+    <noscript><p>此应用需要 JavaScript 才能运行，请启用 JavaScript 后刷新页面。</p></noscript>
     <main class="container">
         <hgroup>
             <h1>README 生成器</h1>
@@ -133,10 +135,10 @@
             <header>
                 <h3>设置</h3>
             </header>
-            <!-- 全局设置 -->
-            <div class="settings-group">
-                <h4 class="settings-group-title">全局设置</h4>
-                <div class="settings-grid">
+            <!-- 基本设置 -->
+            <details class="settings-group" open>
+                <summary class="settings-group-title">基本设置</summary>
+                <div class="settings-grid settings-grid-4">
                     <div>
                         <label for="setting-language">README 语言</label>
                         <select id="setting-language">
@@ -145,6 +147,30 @@
                         </select>
                     </div>
                     <div>
+                        <label for="setting-tone">语气风格</label>
+                        <select id="setting-tone">
+                            <option value="professional">专业正式</option>
+                            <option value="casual">轻松友好</option>
+                            <option value="technical">高度技术</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="setting-temperature">温度 <span id="temp-value">0.7</span></label>
+                        <input type="range" id="setting-temperature" min="0" max="2" step="0.1" value="0.7">
+                    </div>
+                    <div class="checkbox-wrap">
+                        <label for="setting-badges">
+                            <input type="checkbox" id="setting-badges" role="switch" checked>
+                            生成 Badge
+                        </label>
+                    </div>
+                </div>
+            </details>
+            <!-- 高级设置 -->
+            <details class="settings-group">
+                <summary class="settings-group-title">高级设置</summary>
+                <div class="settings-grid">
+                    <div>
                         <label for="setting-max-analyze">分析 max_tokens</label>
                         <input type="number" id="setting-max-analyze" min="4096" max="131072" step="1024" value="16384">
                     </div>
@@ -152,15 +178,27 @@
                         <label for="setting-max-generate">生成 max_tokens</label>
                         <input type="number" id="setting-max-generate" min="4096" max="131072" step="1024" value="32768">
                     </div>
+                    <div>
+                        <label for="setting-custom-sections">自定义章节</label>
+                        <input type="text" id="setting-custom-sections" placeholder="如: FAQ,Changelog,Contributing">
+                    </div>
+                    <div>
+                        <label for="setting-exclude-sections">排除章节</label>
+                        <input type="text" id="setting-exclude-sections" placeholder="如: License,Badges">
+                    </div>
                 </div>
-            </div>
+                <div style="margin-top:0.75rem">
+                    <label for="setting-custom-prompt">自定义 Prompt 追加</label>
+                    <textarea id="setting-custom-prompt" rows="3" placeholder="在生成 prompt 末尾追加的自定义指令..." style="font-size:0.85rem"></textarea>
+                </div>
+            </details>
             <!-- API Key 配置 -->
-            <div class="settings-group">
-                <h4 class="settings-group-title">API Key 配置</h4>
+            <details class="settings-group" open>
+                <summary class="settings-group-title">API Key 配置</summary>
                 <div id="settings-body">
                     <!-- 动态生成 -->
                 </div>
-            </div>
+            </details>
             <footer>
                 <div class="grid">
                     <button id="settings-save-btn" class="contrast">保存</button>
@@ -170,7 +208,8 @@
         </article>
     </dialog>
 
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked@15.0.4/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.6/dist/purify.min.js"></script>
     <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/highlight.min.js"></script>
     <script src="/static/app.js"></script>
 </body>
