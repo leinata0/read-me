@@ -164,23 +164,29 @@ window.onerror = function (msg, url, line) {
         return null;
     }
 
-    // --- Marked 配置 ---
+    // --- Marked 配置（兼容 v4-v15） ---
     try {
-        marked.setOptions({ breaks: false, gfm: true });
+        if (typeof marked.setOptions === 'function') {
+            marked.setOptions({ breaks: false, gfm: true });
+        } else if (typeof marked.use === 'function') {
+            marked.use({ breaks: false, gfm: true });
+        }
 
         // 用 hljs renderer 覆盖 code 渲染
-        if (typeof hljs !== 'undefined') {
-            const renderer = new marked.Renderer();
-            renderer.code = function ({ text, lang }) {
-                let highlighted = text;
-                if (lang && hljs.getLanguage(lang)) {
-                    highlighted = hljs.highlight(text, { language: lang }).value;
-                } else if (!lang) {
-                    highlighted = hljs.highlightAuto(text).value;
+        if (typeof hljs !== 'undefined' && typeof marked.use === 'function') {
+            marked.use({
+                renderer: {
+                    code({ text, lang }) {
+                        let highlighted = text;
+                        if (lang && hljs.getLanguage(lang)) {
+                            highlighted = hljs.highlight(text, { language: lang }).value;
+                        } else if (!lang) {
+                            highlighted = hljs.highlightAuto(text).value;
+                        }
+                        return `<pre><code class="hljs${lang ? ' language-' + lang : ''}">${highlighted}</code></pre>`;
+                    }
                 }
-                return `<pre><code class="hljs${lang ? ' language-' + lang : ''}">${highlighted}</code></pre>`;
-            };
-            marked.use({ renderer });
+            });
         }
     } catch (e) {
         console.warn('Marked 配置失败，使用默认配置:', e);
@@ -188,7 +194,7 @@ window.onerror = function (msg, url, line) {
 
     // --- 安全渲染（DOMPurify 可选） ---
     function safeRender(md) {
-        const html = marked.parse(md);
+        const html = typeof marked.parse === 'function' ? marked.parse(md) : marked(md);
         if (typeof DOMPurify !== 'undefined') {
             return DOMPurify.sanitize(html);
         }
