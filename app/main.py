@@ -9,7 +9,6 @@ from typing import AsyncGenerator
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, StreamingResponse, Response, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -24,13 +23,6 @@ logging.basicConfig(level=logging.INFO)
 BASE_DIR = Path(__file__).resolve().parent
 
 app = FastAPI(title="README Generator", version="1.2.0")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:8000", "http://127.0.0.1:8000"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 
 @app.exception_handler(ProviderError)
