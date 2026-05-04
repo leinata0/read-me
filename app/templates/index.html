@@ -128,9 +128,21 @@
                 </div>
 
                 <footer>
-                    <div class="grid">
-                        <button id="download-btn" class="contrast">下载 README.md</button>
-                        <button id="regenerate-btn" class="secondary outline">重新生成</button>
+                    <div class="feedback-bar">
+                        <div class="feedback-chips">
+                            <button type="button" class="chip" data-feedback="描述太长，精简一下">精简描述</button>
+                            <button type="button" class="chip" data-feedback="加一个 API 文档章节">加 API 章节</button>
+                            <button type="button" class="chip" data-feedback="语气更轻松友好">更友好</button>
+                            <button type="button" class="chip" data-feedback="代码示例更详细一些">更多示例</button>
+                            <button type="button" class="chip" data-feedback="添加中文翻译">加中文</button>
+                            <button type="button" class="chip" data-feedback="去掉 Badge">去 Badge</button>
+                        </div>
+                        <textarea id="feedback-input" rows="2" placeholder="输入修改反馈，如：描述太长、加个 API 章节... (Enter 提交, Ctrl+Enter 换行)"></textarea>
+                        <div class="feedback-actions">
+                            <button id="feedback-btn" class="contrast">根据反馈重新生成</button>
+                            <button id="download-btn">下载 README.md</button>
+                            <button id="regenerate-btn" class="secondary outline">完全重新生成</button>
+                        </div>
                     </div>
                 </footer>
             </article>
@@ -186,6 +198,38 @@
                         </label>
                     </div>
                 </div>
+                <div class="settings-row">
+                    <div>
+                        <label for="setting-badge-style">Badge 样式</label>
+                        <select id="setting-badge-style">
+                            <option value="shields">Shields.io</option>
+                            <option value="shields-flat">Shields Flat</option>
+                            <option value="badgen">Badgen</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="setting-code-examples">代码示例</label>
+                        <select id="setting-code-examples">
+                            <option value="minimal">简洁</option>
+                            <option value="normal" selected>适中</option>
+                            <option value="detailed">详细</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="settings-row">
+                    <div class="slider-wrap">
+                        <label for="setting-toc-depth">目录深度 <output id="toc-value">2</output></label>
+                        <input type="range" id="setting-toc-depth" min="1" max="4" step="1" value="2">
+                    </div>
+                    <div>
+                        <label for="setting-audience">目标受众</label>
+                        <select id="setting-audience">
+                            <option value="developer">开发者</option>
+                            <option value="user">终端用户</option>
+                            <option value="contributor">贡献者</option>
+                        </select>
+                    </div>
+                </div>
             </div>
 
             <div id="stab-advanced" class="settings-tab-content">
@@ -217,6 +261,19 @@
                     <div>
                         <label for="setting-exclude-patterns">排除文件</label>
                         <input type="text" id="setting-exclude-patterns" placeholder="*.test.js,vendor/*">
+                    </div>
+                </div>
+                <div class="settings-row">
+                    <div>
+                        <label for="setting-section-order">章节顺序</label>
+                        <input type="text" id="setting-section-order" placeholder="如: 安装,使用,架构,许可证">
+                    </div>
+                    <div>
+                        <label for="setting-link-style">链接样式</label>
+                        <select id="setting-link-style">
+                            <option value="inline">行内式</option>
+                            <option value="reference">引用式</option>
+                        </select>
                     </div>
                 </div>
                 <div>

@@ -136,6 +136,14 @@ async def api_analyze(req: AnalyzeRequest):
                 custom_prompt_suffix=req.custom_prompt_suffix,
                 include_patterns=req.include_patterns,
                 exclude_patterns=req.exclude_patterns,
+                feedback=req.feedback,
+                previous_readme=req.previous_readme,
+                badge_style=req.badge_style,
+                toc_depth=req.toc_depth,
+                code_examples=req.code_examples,
+                link_style=req.link_style,
+                section_order=req.section_order,
+                audience=req.audience,
             )
             done_data = json.dumps({"model": result.model, "provider": result.provider}, ensure_ascii=False)
             await queue.put(f"event: done\ndata: {done_data}\n\n")

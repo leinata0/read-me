@@ -26,6 +26,16 @@ class AnalyzeRequest(BaseModel):
     custom_prompt_suffix: str = ""
     include_patterns: str = ""
     exclude_patterns: str = ""
+    # 反馈式重新生成
+    feedback: str = ""
+    previous_readme: str = ""
+    # 细致选项
+    badge_style: str = "shields"  # shields / shields-flat / badgen
+    toc_depth: int = 2  # 1-4
+    code_examples: str = "normal"  # minimal / normal / detailed
+    link_style: str = "inline"  # inline / reference
+    section_order: str = ""  # 自定义章节顺序
+    audience: str = "developer"  # developer / user / contributor
 
 
 class ProviderInfo(BaseModel):

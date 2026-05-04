@@ -70,6 +70,15 @@ window.onerror = function (msg, url, line) {
     const settingCustomPrompt = document.getElementById('setting-custom-prompt');
     const settingIncludePatterns = document.getElementById('setting-include-patterns');
     const settingExcludePatterns = document.getElementById('setting-exclude-patterns');
+    const settingBadgeStyle = document.getElementById('setting-badge-style');
+    const settingTocDepth = document.getElementById('setting-toc-depth');
+    const tocValue = document.getElementById('toc-value');
+    const settingCodeExamples = document.getElementById('setting-code-examples');
+    const settingLinkStyle = document.getElementById('setting-link-style');
+    const settingSectionOrder = document.getElementById('setting-section-order');
+    const settingAudience = document.getElementById('setting-audience');
+    const feedbackInput = document.getElementById('feedback-input');
+    const feedbackBtn = document.getElementById('feedback-btn');
     const keyStatus = document.getElementById('key-status');
     const keyStatusText = document.getElementById('key-status-text');
 
@@ -253,6 +262,13 @@ window.onerror = function (msg, url, line) {
         settingCustomPrompt.value = s.custom_prompt_suffix || '';
         settingIncludePatterns.value = s.include_patterns || '';
         settingExcludePatterns.value = s.exclude_patterns || '';
+        settingBadgeStyle.value = s.badge_style || 'shields';
+        settingTocDepth.value = s.toc_depth ?? 2;
+        tocValue.textContent = s.toc_depth ?? 2;
+        settingCodeExamples.value = s.code_examples || 'normal';
+        settingLinkStyle.value = s.link_style || 'inline';
+        settingSectionOrder.value = s.section_order || '';
+        settingAudience.value = s.audience || 'developer';
     }
 
     function collectSettingsFromUI() {
@@ -268,6 +284,12 @@ window.onerror = function (msg, url, line) {
             custom_prompt_suffix: settingCustomPrompt.value.trim(),
             include_patterns: settingIncludePatterns.value.trim(),
             exclude_patterns: settingExcludePatterns.value.trim(),
+            badge_style: settingBadgeStyle.value,
+            toc_depth: parseInt(settingTocDepth.value) || 2,
+            code_examples: settingCodeExamples.value,
+            link_style: settingLinkStyle.value,
+            section_order: settingSectionOrder.value.trim(),
+            audience: settingAudience.value,
         };
     }
 
@@ -565,6 +587,38 @@ window.onerror = function (msg, url, line) {
         tempValue.textContent = settingTemperature.value;
     });
 
+    // 目录深度滑块实时显示
+    settingTocDepth.addEventListener('input', () => {
+        tocValue.textContent = settingTocDepth.value;
+    });
+
+    // ========== 反馈栏 ==========
+
+    // 快捷反馈按钮
+    document.querySelectorAll('.feedback-chips .chip').forEach(btn => {
+        btn.addEventListener('click', () => {
+            feedbackInput.value = btn.dataset.feedback;
+            feedbackInput.focus();
+        });
+    });
+
+    // 反馈提交
+    feedbackBtn.addEventListener('click', () => {
+        if (!feedbackInput.value.trim()) {
+            feedbackInput.focus();
+            return;
+        }
+        form.requestSubmit();
+    });
+
+    // Enter 提交, Ctrl+Enter 换行
+    feedbackInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.ctrlKey && !e.shiftKey) {
+            e.preventDefault();
+            feedbackBtn.click();
+        }
+    });
+
     // ========== 标签页切换 ==========
 
     tabBtns.forEach(btn => {
@@ -689,6 +743,14 @@ window.onerror = function (msg, url, line) {
             custom_prompt_suffix: savedSettings.custom_prompt_suffix || '',
             include_patterns: savedSettings.include_patterns || '',
             exclude_patterns: savedSettings.exclude_patterns || '',
+            feedback: feedbackInput.value.trim(),
+            previous_readme: feedbackInput.value.trim() ? currentReadme : '',
+            badge_style: savedSettings.badge_style || 'shields',
+            toc_depth: savedSettings.toc_depth ?? 2,
+            code_examples: savedSettings.code_examples || 'normal',
+            link_style: savedSettings.link_style || 'inline',
+            section_order: savedSettings.section_order || '',
+            audience: savedSettings.audience || 'developer',
         };
 
         currentAbortController = new AbortController();
@@ -822,6 +884,7 @@ window.onerror = function (msg, url, line) {
     // ========== 重新生成 ==========
 
     regenerateBtn.addEventListener('click', () => {
+        feedbackInput.value = '';
         form.requestSubmit();
     });
 

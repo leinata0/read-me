@@ -120,7 +120,8 @@ def build_analysis_prompt(snapshots: list[FileSnapshot], existing_readme: str | 
     return "\n".join(parts)
 
 
-def build_readme_prompt(analysis: ProjectAnalysis, snapshots: list[FileSnapshot]) -> str:
+def build_readme_prompt(analysis: ProjectAnalysis, snapshots: list[FileSnapshot],
+                        previous_readme: str = "", feedback: str = "") -> str:
     parts = ["## Project Analysis\n"]
     analysis_md = f"- **Name**: {analysis.project_name}\n"
     analysis_md += f"- **Description**: {analysis.description}\n"
@@ -156,6 +157,13 @@ def build_readme_prompt(analysis: ProjectAnalysis, snapshots: list[FileSnapshot]
     if analysis.existing_readme:
         parts.append("\n## Existing README Content (preserve important parts)\n")
         parts.append(analysis.existing_readme)
+
+    # 反馈式重新生成：注入当前版本和用户反馈
+    if feedback and previous_readme:
+        parts.append("\n## 当前版本 README（需要根据用户反馈修订）\n")
+        parts.append(previous_readme)
+        parts.append(f"\n## 用户反馈\n{feedback}")
+        parts.append("\n请根据以上反馈对当前版本进行修订，保留好的部分，只修改反馈中提到的问题。")
 
     return "\n".join(parts)
 
@@ -194,9 +202,13 @@ async def analyze_project(
 
 def _build_generation_prompt(language: str, tone: str, include_badges: bool,
                               custom_sections: str, exclude_sections: str,
-                              custom_prompt_suffix: str) -> str:
+                              custom_prompt_suffix: str,
+                              badge_style: str = "shields", toc_depth: int = 2,
+                              code_examples: str = "normal", link_style: str = "inline",
+                              section_order: str = "", audience: str = "developer") -> str:
     base = GENERATION_SYSTEM_PROMPT_ZH if language == "zh" else GENERATION_SYSTEM_PROMPT_EN
 
+    # 语气
     tone_map = {
         "professional": {"zh": "\n- 使用专业、正式的技术文档语气", "en": "\n- Use a professional, formal technical documentation tone"},
         "casual": {"zh": "\n- 使用轻松友好的语气，适合开源社区", "en": "\n- Use a casual, friendly tone suitable for open-source communities"},
@@ -205,10 +217,54 @@ def _build_generation_prompt(language: str, tone: str, include_badges: bool,
     if tone in tone_map:
         base += tone_map[tone].get(language, tone_map[tone]["en"])
 
+    # Badge
     if not include_badges:
         badge_line = "- 添加适合该语言/生态系统的 badge" if language == "zh" else "- Badge suggestions appropriate for the language/ecosystem"
         base = base.replace(badge_line, "")
+    elif badge_style != "shields":
+        if language == "zh":
+            base += f"\n- 使用 {badge_style} 样式的 Badge"
+        else:
+            base += f"\n- Use {badge_style} style badges"
 
+    # 目录深度
+    if toc_depth < 2:
+        if language == "zh":
+            base += f"\n- 目录只显示到 h{toc_depth + 1} 级标题"
+        else:
+            base += f"\n- Table of contents should only include h{toc_depth + 1} and above"
+
+    # 代码示例详细度
+    code_map = {
+        "minimal": {"zh": "\n- 代码示例保持简洁，只展示核心用法", "en": "\n- Keep code examples minimal, showing only core usage"},
+        "detailed": {"zh": "\n- 代码示例要详细，包含多种场景和完整的错误处理", "en": "\n- Provide detailed code examples with multiple scenarios and error handling"},
+    }
+    if code_examples in code_map:
+        base += code_map[code_examples].get(language, code_map[code_examples]["en"])
+
+    # 链接样式
+    if link_style == "reference":
+        if language == "zh":
+            base += "\n- 使用 Markdown 引用式链接（reference-style links）"
+        else:
+            base += "\n- Use reference-style Markdown links"
+
+    # 章节顺序
+    if section_order:
+        if language == "zh":
+            base += f"\n- 请按以下顺序排列章节：{section_order}"
+        else:
+            base += f"\n- Arrange sections in this order: {section_order}"
+
+    # 目标受众
+    audience_map = {
+        "user": {"zh": "\n- 面向终端用户，减少技术细节，多写使用方法和示例", "en": "\n- Target end users: reduce technical details, focus on usage and examples"},
+        "contributor": {"zh": "\n- 面向贡献者，包含开发环境搭建、测试方法、提交规范", "en": "\n- Target contributors: include dev setup, testing, and contribution guidelines"},
+    }
+    if audience in audience_map:
+        base += audience_map[audience].get(language, audience_map[audience]["en"])
+
+    # 自定义章节
     if custom_sections:
         if language == "zh":
             base += f"\n- 请额外包含以下章节：{custom_sections}"
@@ -239,12 +295,21 @@ async def generate_readme(
     custom_sections: str = "",
     exclude_sections: str = "",
     custom_prompt_suffix: str = "",
+    feedback: str = "",
+    previous_readme: str = "",
+    badge_style: str = "shields",
+    toc_depth: int = 2,
+    code_examples: str = "normal",
+    link_style: str = "inline",
+    section_order: str = "",
+    audience: str = "developer",
 ) -> str:
     await on_progress("正在生成 README...")
 
-    user_prompt = build_readme_prompt(analysis, snapshots)
+    user_prompt = build_readme_prompt(analysis, snapshots, previous_readme, feedback)
     system_prompt = _build_generation_prompt(
-        language, tone, include_badges, custom_sections, exclude_sections, custom_prompt_suffix
+        language, tone, include_badges, custom_sections, exclude_sections, custom_prompt_suffix,
+        badge_style, toc_depth, code_examples, link_style, section_order, audience,
     )
     return await provider.generate_stream(system_prompt, user_prompt, on_chunk)
 
@@ -262,6 +327,14 @@ async def run_pipeline(
     custom_prompt_suffix: str = "",
     include_patterns: str = "",
     exclude_patterns: str = "",
+    feedback: str = "",
+    previous_readme: str = "",
+    badge_style: str = "shields",
+    toc_depth: int = 2,
+    code_examples: str = "normal",
+    link_style: str = "inline",
+    section_order: str = "",
+    audience: str = "developer",
 ) -> GenerateResponse:
     await on_progress("正在校验项目路径...")
     resolved = validate_path(folder_path)
@@ -273,13 +346,18 @@ async def run_pipeline(
     if not snapshots:
         raise ValueError("项目中未找到源代码文件，请确保文件夹中包含代码文件。")
 
-    await on_progress(f"找到 {len(snapshots)} 个源文件，正在分析...")
-
-    analysis = await analyze_project(provider, snapshots, existing_readme, on_progress, language)
+    # 有 feedback 时跳过分析步骤，直接用缓存的 analysis 重新生成
+    if feedback and previous_readme:
+        await on_progress("根据反馈修订中...")
+        analysis = await analyze_project(provider, snapshots, existing_readme, on_progress, language)
+    else:
+        await on_progress(f"找到 {len(snapshots)} 个源文件，正在分析...")
+        analysis = await analyze_project(provider, snapshots, existing_readme, on_progress, language)
 
     readme = await generate_readme(
         provider, analysis, snapshots, on_progress, on_chunk,
         language, tone, include_badges, custom_sections, exclude_sections, custom_prompt_suffix,
+        feedback, previous_readme, badge_style, toc_depth, code_examples, link_style, section_order, audience,
     )
 
     return GenerateResponse(
