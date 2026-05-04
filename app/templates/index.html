@@ -13,7 +13,7 @@
     <noscript><p>此应用需要 JavaScript 才能运行，请启用 JavaScript 后刷新页面。</p></noscript>
     <main class="container">
         <hgroup>
-            <h1>README 生成器</h1>
+            <h1>README 生成器 <button type="button" id="theme-toggle" class="theme-toggle" title="切换深色模式">&#9790;</button></h1>
             <p>AI 驱动的 README.md 自动生成工具，适用于任何项目</p>
         </hgroup>
 
@@ -44,14 +44,14 @@
                     </div>
                 </div>
 
-                <!-- Key 状态提示 -->
                 <div id="key-status" class="key-status" style="display:none">
                     <small id="key-status-text"></small>
                 </div>
 
                 <div class="grid">
                     <button type="submit" id="generate-btn" class="contrast">生成 README</button>
-                    <button type="button" id="test-btn" class="secondary outline" onclick="window.__testConnection()">测试连接</button>
+                    <button type="button" id="test-btn" class="secondary outline">测试连接</button>
+                    <button type="button" id="cancel-btn" class="secondary outline" style="display:none">取消生成</button>
                 </div>
                 <div id="test-status" class="test-status" style="display:none">
                     <small id="test-status-text"></small>
@@ -100,7 +100,6 @@
             </div>
         </section>
 
-        <!-- 错误区 -->
         <article id="error-section" style="display:none" class="error-card">
             <header>错误</header>
             <p id="error-message"></p>
@@ -122,6 +121,9 @@
                 </div>
 
                 <div id="tab-source" class="tab-content">
+                    <div class="source-toolbar">
+                        <button type="button" id="copy-btn" class="secondary outline small-btn">复制源码</button>
+                    </div>
                     <textarea id="readme-source" rows="30" spellcheck="false"></textarea>
                 </div>
 
@@ -133,6 +135,14 @@
                 </footer>
             </article>
         </section>
+
+        <!-- 历史记录 -->
+        <section id="history-section" style="display:none">
+            <details class="settings-group">
+                <summary class="settings-group-title">历史记录 <span id="history-count"></span></summary>
+                <div id="history-list"></div>
+            </details>
+        </section>
     </main>
 
     <!-- 设置弹窗 -->
@@ -141,7 +151,6 @@
             <header>
                 <h3>设置</h3>
             </header>
-            <!-- 基本设置 -->
             <details class="settings-group" open>
                 <summary class="settings-group-title">基本设置</summary>
                 <div class="settings-grid settings-grid-4">
@@ -172,7 +181,6 @@
                     </div>
                 </div>
             </details>
-            <!-- 高级设置 -->
             <details class="settings-group">
                 <summary class="settings-group-title">高级设置</summary>
                 <div class="settings-grid">
@@ -193,17 +201,24 @@
                         <input type="text" id="setting-exclude-sections" placeholder="如: License,Badges">
                     </div>
                 </div>
+                <div class="settings-grid" style="margin-top:0.75rem">
+                    <div>
+                        <label for="setting-include-patterns">包含文件模式</label>
+                        <input type="text" id="setting-include-patterns" placeholder="如: *.py,*.js（留空=全部）">
+                    </div>
+                    <div>
+                        <label for="setting-exclude-patterns">排除文件模式</label>
+                        <input type="text" id="setting-exclude-patterns" placeholder="如: *.test.js,vendor/*">
+                    </div>
+                </div>
                 <div style="margin-top:0.75rem">
                     <label for="setting-custom-prompt">自定义 Prompt 追加</label>
                     <textarea id="setting-custom-prompt" rows="3" placeholder="在生成 prompt 末尾追加的自定义指令..." style="font-size:0.85rem"></textarea>
                 </div>
             </details>
-            <!-- API Key 配置 -->
             <details class="settings-group" open>
                 <summary class="settings-group-title">API Key 配置</summary>
-                <div id="settings-body">
-                    <!-- 动态生成 -->
-                </div>
+                <div id="settings-body"></div>
             </details>
             <footer>
                 <div class="grid">

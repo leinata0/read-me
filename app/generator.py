@@ -10,7 +10,7 @@ from app.analyzer import (
     ENTRY_NAMES,
 )
 from app.models import FileSnapshot, ProjectAnalysis, GenerateResponse
-from app.providers import AIProvider
+from app.providers import AIProvider, _retry_on_transient
 
 ANALYSIS_SYSTEM_PROMPT_ZH = """\
 你是一名资深软件工程师，正在分析一个代码仓库。你的任务是提取项目的结构化信息。
@@ -184,7 +184,7 @@ async def analyze_project(
     schema = _get_project_analysis_schema()
     system_prompt = ANALYSIS_SYSTEM_PROMPT_ZH if language == "zh" else ANALYSIS_SYSTEM_PROMPT_EN
 
-    result = await provider.analyze(system_prompt, user_prompt, schema)
+    result = await _retry_on_transient(provider.analyze, system_prompt, user_prompt, schema)
     analysis = ProjectAnalysis(**result)
     analysis.existing_readme = existing_readme
 
@@ -260,13 +260,15 @@ async def run_pipeline(
     custom_sections: str = "",
     exclude_sections: str = "",
     custom_prompt_suffix: str = "",
+    include_patterns: str = "",
+    exclude_patterns: str = "",
 ) -> GenerateResponse:
     await on_progress("正在校验项目路径...")
     resolved = validate_path(folder_path)
 
     await on_progress("正在读取项目文件...")
     gitignore = load_gitignore_patterns(resolved)
-    snapshots, existing_readme = traverse_project(resolved, gitignore)
+    snapshots, existing_readme = traverse_project(resolved, gitignore, include_patterns, exclude_patterns)
 
     if not snapshots:
         raise ValueError("项目中未找到源代码文件，请确保文件夹中包含代码文件。")

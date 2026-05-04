@@ -522,3 +522,63 @@ details.settings-group[open] summary::before {
     color: #1565c0;
     font-family: system-ui, sans-serif;
 }
+
+/* --- Theme Toggle --- */
+.theme-toggle {
+    background: none;
+    border: none;
+    font-size: 1.2rem;
+    cursor: pointer;
+    vertical-align: middle;
+    padding: 0 0.25rem;
+    opacity: 0.7;
+    transition: opacity 0.2s;
+}
+.theme-toggle:hover { opacity: 1; }
+
+/* --- Source Toolbar --- */
+.source-toolbar {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 0.5rem;
+}
+.small-btn {
+    font-size: 0.75rem;
+    padding: 0.2rem 0.6rem;
+}
+
+/* --- History --- */
+#history-list {
+    max-height: 300px;
+    overflow-y: auto;
+}
+.history-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.4rem 0;
+    border-bottom: 1px solid var(--pico-muted-border-color);
+}
+.history-item:last-child { border-bottom: none; }
+.history-info {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+}
+.history-info strong { font-size: 0.85rem; }
+.history-info small { color: var(--pico-muted-color); font-size: 0.75rem; }
+.history-actions {
+    display: flex;
+    gap: 0.25rem;
+}
+
+/* --- Cancel Button --- */
+#cancel-btn {
+    background-color: #e74c3c;
+    border-color: #e74c3c;
+    color: white;
+}
+#cancel-btn:hover {
+    background-color: #c0392b;
+    border-color: #c0392b;
+}

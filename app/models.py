@@ -24,6 +24,8 @@ class AnalyzeRequest(BaseModel):
     exclude_sections: str = ""
     include_badges: bool = True
     custom_prompt_suffix: str = ""
+    include_patterns: str = ""
+    exclude_patterns: str = ""
 
 
 class ProviderInfo(BaseModel):

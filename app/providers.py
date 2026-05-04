@@ -12,6 +12,27 @@ from app.models import ProviderInfo, ProviderError, ProviderKeys
 
 logger = logging.getLogger(__name__)
 
+RETRYABLE_CODES = {429, 503}
+MAX_RETRIES = 3
+RETRY_DELAYS = [1, 2, 4]
+
+
+async def _retry_on_transient(coro_factory, *args, **kwargs):
+    """Retry an async callable on transient errors (429/503) with exponential backoff."""
+    last_exc = None
+    for attempt in range(MAX_RETRIES):
+        try:
+            return await coro_factory(*args, **kwargs)
+        except ProviderError as e:
+            if e.code in RETRYABLE_CODES and attempt < MAX_RETRIES - 1:
+                delay = RETRY_DELAYS[attempt]
+                logger.warning("Transient error %d, retrying in %ds (attempt %d/%d)", e.code, delay, attempt + 1, MAX_RETRIES)
+                await asyncio.sleep(delay)
+                last_exc = e
+            else:
+                raise
+    raise last_exc
+
 
 class AIProvider(ABC):
     name: str = ""
@@ -100,6 +121,7 @@ class AnthropicProvider(AIProvider):
             response = await self.client.messages.create(
                 model=self.model,
                 max_tokens=self.max_tokens_analyze,
+                temperature=self.temperature,
                 system=full_system,
                 messages=[{"role": "user", "content": user_prompt}],
             )
@@ -122,6 +144,7 @@ class AnthropicProvider(AIProvider):
                 retry_response = await self.client.messages.create(
                     model=self.model,
                     max_tokens=self.max_tokens_analyze,
+                    temperature=self.temperature,
                     system="You must respond with ONLY a valid JSON object. No markdown, no text, no explanation.",
                     messages=[
                         {"role": "user", "content": f"Your previous response was not valid JSON:\n\n{text[:3000]}\n\nPlease redo it as a single valid JSON object matching the schema. Output ONLY the JSON."},
@@ -151,6 +174,7 @@ class AnthropicProvider(AIProvider):
             async with self.client.messages.stream(
                 model=self.model,
                 max_tokens=self.max_tokens_generate,
+                temperature=self.temperature,
                 system=system_prompt,
                 messages=[{"role": "user", "content": user_prompt}],
             ) as stream:
@@ -189,6 +213,7 @@ class OpenAICompatibleProvider(AIProvider):
             response = await self.client.chat.completions.create(
                 model=self.model,
                 max_tokens=self.max_tokens_analyze,
+                temperature=self.temperature,
                 response_format={"type": "json_object"},
                 messages=[
                     {"role": "system", "content": system_prompt},
@@ -211,6 +236,7 @@ class OpenAICompatibleProvider(AIProvider):
             stream = await self.client.chat.completions.create(
                 model=self.model,
                 max_tokens=self.max_tokens_generate,
+                temperature=self.temperature,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
@@ -285,6 +311,7 @@ class GeminiProvider(AIProvider):
                     system_instruction=system_prompt,
                     response_mime_type="application/json",
                     max_output_tokens=self.max_tokens_analyze,
+                    temperature=self.temperature,
                 ),
             )
             text = response.text or "{}"
@@ -306,6 +333,7 @@ class GeminiProvider(AIProvider):
                 config=self._types.GenerateContentConfig(
                     system_instruction=system_prompt,
                     max_output_tokens=self.max_tokens_generate,
+                    temperature=self.temperature,
                 ),
             )
             async for chunk in response:
@@ -463,7 +491,8 @@ def list_providers() -> list[ProviderInfo]:
     return result
 
 
-def get_provider(provider_name: str, model: str | None = None, api_keys: dict[str, ProviderKeys] | None = None) -> AIProvider:
+def get_provider(provider_name: str, model: str | None = None, api_keys: dict[str, ProviderKeys] | None = None,
+                 temperature: float = 0.7) -> AIProvider:
     cls = PROVIDERS.get(provider_name)
     if not cls:
         raise ProviderError(400, f"Unknown provider: {provider_name}. Available: {list(PROVIDERS.keys())}")
@@ -473,7 +502,7 @@ def get_provider(provider_name: str, model: str | None = None, api_keys: dict[st
     base_url = keys.base_url if keys and keys.base_url else None
     max_analyze = keys.max_tokens_analyze if keys else 16384
     max_generate = keys.max_tokens_generate if keys else 32768
-    temperature = keys.temperature if keys else 0.7
+    temperature = keys.temperature if keys and keys.temperature is not None else temperature
 
     return cls(model=model, api_key=api_key, base_url=base_url,
                max_tokens_analyze=max_analyze, max_tokens_generate=max_generate,

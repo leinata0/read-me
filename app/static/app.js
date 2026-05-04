@@ -8,20 +8,20 @@ window.onerror = function (msg, url, line) {
 
 (function () {
     'use strict';
-    console.log('[README-GEN] IIFE 开始执行');
 
     // 安全检查外部依赖
     if (typeof marked === 'undefined') {
         document.body.insertAdjacentHTML('afterbegin', '<p style="color:red;padding:1rem">错误：marked.js 未加载，请检查网络连接后刷新页面。</p>');
         return;
     }
-    console.log('[README-GEN] marked 已加载');
 
     // --- 常量 ---
     const LS_KEYS = 'readme-gen-keys';
     const LS_PROVIDER = 'readme-gen-provider';
     const LS_MODEL = 'readme-gen-model';
     const LS_SETTINGS = 'readme-gen-settings';
+    const LS_THEME = 'readme-gen-theme';
+    const LS_HISTORY = 'readme-gen-history';
 
     // --- DOM ---
     const form = document.getElementById('analyze-form');
@@ -46,6 +46,12 @@ window.onerror = function (msg, url, line) {
     const downloadBtn = document.getElementById('download-btn');
     const regenerateBtn = document.getElementById('regenerate-btn');
     const testBtn = document.getElementById('test-btn');
+    const cancelBtn = document.getElementById('cancel-btn');
+    const copyBtn = document.getElementById('copy-btn');
+    const themeToggle = document.getElementById('theme-toggle');
+    const historySection = document.getElementById('history-section');
+    const historyList = document.getElementById('history-list');
+    const historyCount = document.getElementById('history-count');
     const tabBtns = document.querySelectorAll('.tab-btn');
     const settingsBtn = document.getElementById('settings-btn');
     const settingsDialog = document.getElementById('settings-dialog');
@@ -62,6 +68,8 @@ window.onerror = function (msg, url, line) {
     const settingCustomSections = document.getElementById('setting-custom-sections');
     const settingExcludeSections = document.getElementById('setting-exclude-sections');
     const settingCustomPrompt = document.getElementById('setting-custom-prompt');
+    const settingIncludePatterns = document.getElementById('setting-include-patterns');
+    const settingExcludePatterns = document.getElementById('setting-exclude-patterns');
     const keyStatus = document.getElementById('key-status');
     const keyStatusText = document.getElementById('key-status-text');
 
@@ -195,7 +203,6 @@ window.onerror = function (msg, url, line) {
     } catch (e) {
         console.warn('Marked 配置失败，使用默认配置:', e);
     }
-    console.log('[README-GEN] Marked 配置完成');
 
     // --- 安全渲染（DOMPurify 可选） ---
     function safeRender(md) {
@@ -244,6 +251,8 @@ window.onerror = function (msg, url, line) {
         settingCustomSections.value = s.custom_sections || '';
         settingExcludeSections.value = s.exclude_sections || '';
         settingCustomPrompt.value = s.custom_prompt_suffix || '';
+        settingIncludePatterns.value = s.include_patterns || '';
+        settingExcludePatterns.value = s.exclude_patterns || '';
     }
 
     function collectSettingsFromUI() {
@@ -257,6 +266,8 @@ window.onerror = function (msg, url, line) {
             custom_sections: settingCustomSections.value.trim(),
             exclude_sections: settingExcludeSections.value.trim(),
             custom_prompt_suffix: settingCustomPrompt.value.trim(),
+            include_patterns: settingIncludePatterns.value.trim(),
+            exclude_patterns: settingExcludePatterns.value.trim(),
         };
     }
 
@@ -578,11 +589,7 @@ window.onerror = function (msg, url, line) {
         testStatus.style.display = 'none';
     }
 
-    console.log('[README-GEN] testBtn =', testBtn);
-
-    // 暴露到 window 供 onclick 调用
-    window.__testConnection = async function () {
-        console.log('[README-GEN] 测试连接按钮被点击');
+    testBtn.addEventListener('click', async function () {
         hideError();
         hideTestStatus();
         const provider = providerSelect.value;
@@ -621,8 +628,7 @@ window.onerror = function (msg, url, line) {
             testBtn.disabled = false;
             testBtn.textContent = '测试连接';
         }
-    };
-    console.log('[README-GEN] 所有事件监听器已注册');
+    });
 
     // ========== 表单提交与 SSE ==========
 
@@ -638,6 +644,10 @@ window.onerror = function (msg, url, line) {
         readmePreview.innerHTML = '';
         readmeSource.value = '';
 
+        cancelBtn.style.display = '';
+        generateBtn.style.display = 'none';
+        testBtn.style.display = 'none';
+
         const savedSettings = loadSettings();
         const body = {
             folder_path: folderInput.value.trim(),
@@ -651,13 +661,18 @@ window.onerror = function (msg, url, line) {
             exclude_sections: savedSettings.exclude_sections || '',
             include_badges: savedSettings.include_badges !== false,
             custom_prompt_suffix: savedSettings.custom_prompt_suffix || '',
+            include_patterns: savedSettings.include_patterns || '',
+            exclude_patterns: savedSettings.exclude_patterns || '',
         };
+
+        currentAbortController = new AbortController();
 
         try {
             const res = await fetch('/api/analyze', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(body),
+                signal: currentAbortController.signal,
             });
 
             if (!res.ok) {
@@ -695,10 +710,18 @@ window.onerror = function (msg, url, line) {
                 }
             }
         } catch (err) {
-            showError(`连接错误: ${err.message}`);
+            if (err.name === 'AbortError') {
+                showError('生成已取消');
+            } else {
+                showError(`连接错误: ${err.message}`);
+            }
         } finally {
+            currentAbortController = null;
             generateBtn.removeAttribute('aria-busy');
             generateBtn.disabled = false;
+            cancelBtn.style.display = 'none';
+            generateBtn.style.display = '';
+            testBtn.style.display = '';
             progressSection.style.display = 'none';
         }
     });
@@ -739,6 +762,16 @@ window.onerror = function (msg, url, line) {
                 completeAllSteps();
                 readmePreview.innerHTML = safeRender(currentReadme);
                 readmeSource.value = currentReadme;
+                // 保存历史
+                if (currentReadme) {
+                    saveHistory({
+                        timestamp: Date.now(),
+                        folder_path: folderInput.value.trim(),
+                        provider: data.provider || providerSelect.value,
+                        model: data.model || modelInput.value,
+                        readme: currentReadme,
+                    });
+                }
                 break;
 
             case 'error': {
@@ -755,27 +788,9 @@ window.onerror = function (msg, url, line) {
 
     // ========== 下载 ==========
 
-    downloadBtn.addEventListener('click', async () => {
+    downloadBtn.addEventListener('click', () => {
         const content = readmeSource.value || currentReadme;
-        if (!content) return;
-
-        try {
-            const res = await fetch('/api/download', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ content }),
-            });
-            if (!res.ok) throw new Error('下载失败');
-            const blob = await res.blob();
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = 'README.md';
-            a.click();
-            URL.revokeObjectURL(url);
-        } catch (err) {
-            showError(`下载错误: ${err.message}`);
-        }
+        if (content) clientDownload(content);
     });
 
     // ========== 重新生成 ==========
@@ -793,7 +808,138 @@ window.onerror = function (msg, url, line) {
         })[c]);
     }
 
+    // ========== 深色模式 ==========
+
+    function applyTheme(theme) {
+        document.documentElement.setAttribute('data-theme', theme);
+        themeToggle.innerHTML = theme === 'dark' ? '&#9788;' : '&#9790;';
+    }
+
+    (function initTheme() {
+        const saved = localStorage.getItem(LS_THEME);
+        const theme = saved || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+        applyTheme(theme);
+    })();
+
+    themeToggle.addEventListener('click', () => {
+        const current = document.documentElement.getAttribute('data-theme');
+        const next = current === 'dark' ? 'light' : 'dark';
+        applyTheme(next);
+        localStorage.setItem(LS_THEME, next);
+    });
+
+    // ========== 取消生成 ==========
+
+    let currentAbortController = null;
+
+    cancelBtn.addEventListener('click', () => {
+        if (currentAbortController) {
+            currentAbortController.abort();
+            currentAbortController = null;
+        }
+    });
+
+    // ========== 复制源码 ==========
+
+    copyBtn.addEventListener('click', async () => {
+        const text = readmeSource.value || currentReadme;
+        if (!text) return;
+        try {
+            await navigator.clipboard.writeText(text);
+            copyBtn.textContent = '已复制 ✓';
+            setTimeout(() => { copyBtn.textContent = '复制源码'; }, 1500);
+        } catch {
+            // fallback
+            readmeSource.select();
+            document.execCommand('copy');
+            copyBtn.textContent = '已复制 ✓';
+            setTimeout(() => { copyBtn.textContent = '复制源码'; }, 1500);
+        }
+    });
+
+    // ========== 客户端下载 ==========
+
+    function clientDownload(content) {
+        const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'README.md';
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+
+    // ========== 历史记录 ==========
+
+    function loadHistory() {
+        try {
+            return JSON.parse(localStorage.getItem(LS_HISTORY) || '[]');
+        } catch { return []; }
+    }
+
+    function saveHistory(entry) {
+        const history = loadHistory();
+        history.unshift(entry);
+        if (history.length > 10) history.length = 10;
+        localStorage.setItem(LS_HISTORY, JSON.stringify(history));
+        renderHistory();
+    }
+
+    function deleteHistory(index) {
+        const history = loadHistory();
+        history.splice(index, 1);
+        localStorage.setItem(LS_HISTORY, JSON.stringify(history));
+        renderHistory();
+    }
+
+    function renderHistory() {
+        const history = loadHistory();
+        if (history.length === 0) {
+            historySection.style.display = 'none';
+            return;
+        }
+        historySection.style.display = '';
+        historyCount.textContent = `(${history.length})`;
+        historyList.innerHTML = '';
+        history.forEach((entry, i) => {
+            const item = document.createElement('div');
+            item.className = 'history-item';
+            const date = new Date(entry.timestamp);
+            const timeStr = date.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+            item.innerHTML = `
+                <span class="history-info">
+                    <strong>${escapeHtml(entry.folder_path.split(/[\\/]/).pop() || entry.folder_path)}</strong>
+                    <small>${timeStr} | ${escapeHtml(entry.provider)} | ${escapeHtml(entry.model)}</small>
+                </span>
+                <span class="history-actions">
+                    <button class="small-btn" data-action="restore" data-index="${i}">恢复</button>
+                    <button class="small-btn secondary" data-action="delete" data-index="${i}">删除</button>
+                </span>
+            `;
+            historyList.appendChild(item);
+        });
+
+        historyList.querySelectorAll('[data-action="restore"]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const idx = parseInt(btn.dataset.index);
+                const entry = loadHistory()[idx];
+                if (entry) {
+                    currentReadme = entry.readme;
+                    readmePreview.innerHTML = safeRender(currentReadme);
+                    readmeSource.value = currentReadme;
+                    previewSection.style.display = '';
+                }
+            });
+        });
+
+        historyList.querySelectorAll('[data-action="delete"]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                deleteHistory(parseInt(btn.dataset.index));
+            });
+        });
+    }
+
     // ========== 初始化 ==========
     loadProviders();
-    console.log('[README-GEN] IIFE 执行完毕');
+    renderHistory();
 })();

@@ -122,7 +122,7 @@ async def api_analyze(req: AnalyzeRequest):
 
     async def background_task():
         try:
-            provider = get_provider(req.provider, req.model, req.api_keys)
+            provider = get_provider(req.provider, req.model, req.api_keys, req.temperature)
             result = await run_pipeline(
                 folder_path=req.folder_path,
                 provider=provider,
@@ -134,6 +134,8 @@ async def api_analyze(req: AnalyzeRequest):
                 custom_sections=req.custom_sections,
                 exclude_sections=req.exclude_sections,
                 custom_prompt_suffix=req.custom_prompt_suffix,
+                include_patterns=req.include_patterns,
+                exclude_patterns=req.exclude_patterns,
             )
             done_data = json.dumps({"model": result.model, "provider": result.provider}, ensure_ascii=False)
             await queue.put(f"event: done\ndata: {done_data}\n\n")
@@ -169,17 +171,3 @@ async def api_analyze(req: AnalyzeRequest):
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
-MAX_DOWNLOAD_BYTES = 1 * 1024 * 1024  # 1MB
-
-
-@app.post("/api/download")
-async def api_download(request: Request):
-    body = await request.json()
-    content = body.get("content", "")
-    if len(content.encode("utf-8")) > MAX_DOWNLOAD_BYTES:
-        return JSONResponse(status_code=413, content={"detail": "Content too large (max 1MB)."})
-    return Response(
-        content=content,
-        media_type="text/markdown; charset=utf-8",
-        headers={"Content-Disposition": 'attachment; filename="README.md"'},
-    )

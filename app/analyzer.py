@@ -124,7 +124,12 @@ def _detect_language(ext: str) -> str:
     return EXT_TO_LANG.get(ext.lower(), "unknown")
 
 
-def traverse_project(folder_path: Path, pathspec_obj: pathspec.PathSpec | None = None) -> tuple[list[FileSnapshot], str | None]:
+def traverse_project(folder_path: Path, pathspec_obj: pathspec.PathSpec | None = None,
+                     include_patterns: str = "", exclude_patterns: str = "") -> tuple[list[FileSnapshot], str | None]:
+    import fnmatch
+
+    include_list = [p.strip() for p in include_patterns.split(",") if p.strip()] if include_patterns else []
+    exclude_list = [p.strip() for p in exclude_patterns.split(",") if p.strip()] if exclude_patterns else []
     snapshots: list[FileSnapshot] = []
     existing_readme: str | None = None
 
@@ -143,6 +148,12 @@ def traverse_project(folder_path: Path, pathspec_obj: pathspec.PathSpec | None =
             rel_file = os.path.join(rel_root_str, filename) if rel_root_str else filename
 
             if pathspec_obj and pathspec_obj.match_file(rel_file):
+                continue
+
+            # Include/exclude pattern filtering
+            if include_list and not any(fnmatch.fnmatch(filename, pat) or fnmatch.fnmatch(rel_file, pat) for pat in include_list):
+                continue
+            if exclude_list and any(fnmatch.fnmatch(filename, pat) or fnmatch.fnmatch(rel_file, pat) for pat in exclude_list):
                 continue
 
             ext = Path(filename).suffix.lower()
