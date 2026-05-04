@@ -1,7 +1,19 @@
 // README 生成器 — 前端逻辑
 
+window.onerror = function (msg, url, line) {
+    document.body.insertAdjacentHTML('afterbegin',
+        '<p style="color:red;padding:1rem;background:#fff3f3;border-bottom:2px solid red;z-index:9999;position:relative">' +
+        'JS 错误: ' + msg + ' (第 ' + line + ' 行)</p>');
+};
+
 (function () {
     'use strict';
+
+    // 安全检查外部依赖
+    if (typeof marked === 'undefined') {
+        document.body.insertAdjacentHTML('afterbegin', '<p style="color:red;padding:1rem">错误：marked.js 未加载，请检查网络连接后刷新页面。</p>');
+        return;
+    }
 
     // --- 常量 ---
     const LS_KEYS = 'readme-gen-keys';
@@ -153,24 +165,34 @@
     }
 
     // --- Marked 配置 ---
-    marked.setOptions({ breaks: false, gfm: true });
+    try {
+        marked.setOptions({ breaks: false, gfm: true });
 
-    // 用 hljs renderer 覆盖 code 渲染（替代已弃用的 highlight 选项）
-    const renderer = new marked.Renderer();
-    renderer.code = function ({ text, lang }) {
-        let highlighted = text;
-        if (lang && hljs.getLanguage(lang)) {
-            highlighted = hljs.highlight(text, { language: lang }).value;
-        } else if (!lang) {
-            highlighted = hljs.highlightAuto(text).value;
+        // 用 hljs renderer 覆盖 code 渲染
+        if (typeof hljs !== 'undefined') {
+            const renderer = new marked.Renderer();
+            renderer.code = function ({ text, lang }) {
+                let highlighted = text;
+                if (lang && hljs.getLanguage(lang)) {
+                    highlighted = hljs.highlight(text, { language: lang }).value;
+                } else if (!lang) {
+                    highlighted = hljs.highlightAuto(text).value;
+                }
+                return `<pre><code class="hljs${lang ? ' language-' + lang : ''}">${highlighted}</code></pre>`;
+            };
+            marked.use({ renderer });
         }
-        return `<pre><code class="hljs${lang ? ' language-' + lang : ''}">${highlighted}</code></pre>`;
-    };
-    marked.use({ renderer });
+    } catch (e) {
+        console.warn('Marked 配置失败，使用默认配置:', e);
+    }
 
-    // --- DOMPurify 安全渲染 ---
+    // --- 安全渲染（DOMPurify 可选） ---
     function safeRender(md) {
-        return DOMPurify.sanitize(marked.parse(md));
+        const html = marked.parse(md);
+        if (typeof DOMPurify !== 'undefined') {
+            return DOMPurify.sanitize(html);
+        }
+        return html;
     }
 
     // ========== API Key 管理 ==========
