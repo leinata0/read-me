@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class ProviderKeys(BaseModel):
@@ -10,6 +10,21 @@ class ProviderKeys(BaseModel):
     max_tokens_analyze: int = 16384
     max_tokens_generate: int = 32768
     temperature: float = 0.7
+
+    @field_validator("base_url")
+    @classmethod
+    def validate_base_url_length(cls, value: str) -> str:
+        return value.strip()[:500]
+
+    @field_validator("max_tokens_analyze", "max_tokens_generate")
+    @classmethod
+    def validate_max_tokens(cls, value: int) -> int:
+        return min(max(value, 1024), 131072)
+
+    @field_validator("temperature")
+    @classmethod
+    def validate_temperature(cls, value: float) -> float:
+        return min(max(value, 0.0), 2.0)
 
 
 class AnalyzeRequest(BaseModel):
@@ -26,16 +41,43 @@ class AnalyzeRequest(BaseModel):
     custom_prompt_suffix: str = ""
     include_patterns: str = ""
     exclude_patterns: str = ""
-    # 反馈式重新生成
     feedback: str = ""
     previous_readme: str = ""
-    # 细致选项
-    badge_style: str = "shields"  # shields / shields-flat / badgen
-    toc_depth: int = 2  # 1-4
-    code_examples: str = "normal"  # minimal / normal / detailed
-    link_style: str = "inline"  # inline / reference
-    section_order: str = ""  # 自定义章节顺序
-    audience: str = "developer"  # developer / user / contributor
+    badge_style: str = "shields"
+    toc_depth: int = 2
+    code_examples: str = "normal"
+    link_style: str = "inline"
+    section_order: str = ""
+    audience: str = "developer"
+
+    @field_validator("folder_path")
+    @classmethod
+    def validate_folder_path(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("folder_path is required")
+        return value[:500]
+
+    @field_validator(
+        "provider", "model", "tone", "custom_sections", "exclude_sections", "custom_prompt_suffix",
+        "include_patterns", "exclude_patterns", "feedback", "previous_readme", "badge_style",
+        "code_examples", "link_style", "section_order", "audience",
+    )
+    @classmethod
+    def trim_strings(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return value.strip()
+
+    @field_validator("temperature")
+    @classmethod
+    def validate_request_temperature(cls, value: float) -> float:
+        return min(max(value, 0.0), 2.0)
+
+    @field_validator("toc_depth")
+    @classmethod
+    def validate_toc_depth(cls, value: int) -> int:
+        return min(max(value, 1), 4)
 
 
 class ProviderInfo(BaseModel):
@@ -58,7 +100,7 @@ class FileSnapshot(BaseModel):
 
 class Dependency(BaseModel):
     name: str
-    category: str = "runtime"  # runtime | dev | test
+    category: str = "runtime"
 
 
 class ProjectAnalysis(BaseModel):
@@ -75,10 +117,15 @@ class ListModelsRequest(BaseModel):
     api_key: str = ""
     base_url: str = ""
 
+    @field_validator("base_url")
+    @classmethod
+    def trim_base_url(cls, value: str) -> str:
+        return value.strip()[:500]
+
 
 class ListModelsResponse(BaseModel):
     models: list[str]
-    source: str  # "fetched" | "fallback"
+    source: str
     error: str = ""
 
 

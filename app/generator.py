@@ -346,7 +346,6 @@ async def run_pipeline(
     if not snapshots:
         raise ValueError("项目中未找到源代码文件，请确保文件夹中包含代码文件。")
 
-    # 有 feedback 时跳过分析步骤，直接用缓存的 analysis 重新生成
     if feedback and previous_readme:
         await on_progress("根据反馈修订中...")
         analysis = await analyze_project(provider, snapshots, existing_readme, on_progress, language)

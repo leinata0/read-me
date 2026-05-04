@@ -70,6 +70,62 @@ MAX_FILE_BYTES = 32 * 1024  # 32KB
 MAX_PATH_LENGTH = 500
 
 ENTRY_NAMES: set[str] = {"main", "app", "index", "server", "cli", "run"}
+PROJECT_DIR_MARKERS: set[str] = {
+    ".git", ".hg", ".svn", "app", "src", "lib", "packages", "cmd",
+    "server", "client", "frontend", "backend", "tests",
+}
+PROJECT_CODE_EXTENSIONS: set[str] = {
+    ".py", ".js", ".ts", ".jsx", ".tsx", ".java", ".go", ".rs",
+    ".rb", ".php", ".c", ".cpp", ".h", ".hpp", ".cs", ".swift",
+    ".kt", ".scala", ".lua", ".pl", ".sh",
+}
+
+
+def _is_relative_to(path: Path, parent: Path) -> bool:
+    try:
+        path.relative_to(parent)
+        return True
+    except ValueError:
+        return False
+
+
+def _is_sensitive_user_path(resolved: Path) -> bool:
+    home = Path.home().resolve()
+    exact_blocked = [
+        home,
+        home / "Desktop",
+        home / "Documents",
+        home / "Downloads",
+        home / "Pictures",
+        home / "Music",
+        home / "Videos",
+        home / "OneDrive",
+    ]
+    nested_blocked = [
+        home / ".ssh",
+        home / ".aws",
+        home / ".gnupg",
+        home / ".config",
+        home / ".kube",
+        home / "AppData",
+    ]
+    if any(resolved == path for path in exact_blocked):
+        return True
+    return any(resolved == path or _is_relative_to(resolved, path) for path in nested_blocked)
+
+
+def _looks_like_project(folder_path: Path) -> bool:
+    try:
+        for entry in folder_path.iterdir():
+            if entry.name in CONFIG_FILES:
+                return True
+            if entry.is_dir() and entry.name in PROJECT_DIR_MARKERS:
+                return True
+            if entry.is_file() and entry.suffix.lower() in PROJECT_CODE_EXTENSIONS:
+                return True
+    except OSError:
+        return False
+    return False
 
 
 def validate_path(folder_path: str) -> Path:
@@ -90,6 +146,12 @@ def validate_path(folder_path: str) -> Path:
         norm_prefix = prefix if prefix.endswith(sep) else prefix + sep
         if resolved_str.startswith(norm_prefix) or resolved_str == prefix:
             raise ValueError("Invalid path. System directories are not allowed.")
+
+    if _is_sensitive_user_path(resolved):
+        raise ValueError("Invalid path. Please select a project folder instead of a personal or sensitive directory.")
+
+    if not _looks_like_project(resolved):
+        raise ValueError("Invalid path. Please select a project folder that contains source code or project files.")
 
     return resolved
 

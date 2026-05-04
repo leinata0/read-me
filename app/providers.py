@@ -7,6 +7,7 @@ import os
 import re
 from abc import ABC, abstractmethod
 from typing import Callable, Awaitable
+from urllib.parse import urlparse
 
 from app.models import ProviderInfo, ProviderError, ProviderKeys
 
@@ -15,6 +16,49 @@ logger = logging.getLogger(__name__)
 RETRYABLE_CODES = {429, 503}
 MAX_RETRIES = 3
 RETRY_DELAYS = [1, 2, 4]
+
+
+def _is_local_ollama_url(base_url: str) -> bool:
+    parsed = urlparse(base_url)
+    hostname = (parsed.hostname or "").lower()
+    return hostname in {"localhost", "127.0.0.1", "0.0.0.0", "::1"}
+
+
+def _ollama_connection_message(base_url: str) -> str:
+    if _is_local_ollama_url(base_url):
+        return f"Cannot reach Ollama at {base_url}. Please start Ollama and confirm the model server is listening."
+    return f"Cannot reach the Ollama-compatible endpoint at {base_url}. Check the Base URL and service status."
+
+
+def _normalize_base_url(base_url: str | None, default_base_url: str, *, allow_localhost: bool = False) -> str:
+    value = (base_url or "").strip()
+    if not value:
+        return default_base_url
+
+    parsed = urlparse(value)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ProviderError(400, "Base URL must be a valid http(s) URL.")
+
+    hostname = (parsed.hostname or "").lower()
+    blocked_hosts = {
+        "169.254.169.254", "metadata.google.internal",
+    }
+    local_hosts = {"localhost", "127.0.0.1", "0.0.0.0", "::1"}
+    if hostname in blocked_hosts or hostname.endswith(".local"):
+        raise ProviderError(400, "Base URL points to a blocked local or metadata address.")
+
+    if hostname in local_hosts and not allow_localhost:
+        raise ProviderError(400, "This provider does not allow localhost Base URL values.")
+
+    if parsed.username or parsed.password:
+        raise ProviderError(400, "Base URL must not contain embedded credentials.")
+
+    if parsed.scheme == "http" and hostname not in local_hosts:
+        raise ProviderError(400, "Custom Base URL must use HTTPS unless it targets local development.")
+
+    return value.rstrip("/")
+
+
 
 
 async def _retry_on_transient(coro_factory, *args, **kwargs):
@@ -53,6 +97,7 @@ class AIProvider(ABC):
         self.max_tokens_generate = max_tokens_generate
         self.temperature = temperature
         base = base_url or os.environ.get(self.base_url_env_key, "") or self.default_base_url
+        base = _normalize_base_url(base, self.default_base_url, allow_localhost=self.name == "ollama")
         self._init_client(key, base)
 
     @abstractmethod
@@ -93,7 +138,7 @@ class AnthropicProvider(AIProvider):
     async def list_models(cls, api_key: str, base_url: str = "") -> list[str]:
         if base_url:
             try:
-                return await _list_openai_compatible_models(api_key, base_url, "")
+                return await _list_openai_compatible_models(api_key, base_url, "", allow_localhost=False)
             except ProviderError:
                 raise
             except Exception as e:
@@ -193,7 +238,7 @@ class OpenAICompatibleProvider(AIProvider):
 
     @classmethod
     async def list_models(cls, api_key: str, base_url: str = "") -> list[str]:
-        return await _list_openai_compatible_models(api_key, base_url, cls.default_list_models_base_url)
+        return await _list_openai_compatible_models(api_key, base_url, cls.default_list_models_base_url, allow_localhost=cls.name == "ollama")
 
     def _init_client(self, api_key: str, base_url: str) -> None:
         from openai import AsyncOpenAI
@@ -223,7 +268,7 @@ class OpenAICompatibleProvider(AIProvider):
             text = response.choices[0].message.content or "{}"
             return _extract_json(text)
         except Exception as e:
-            raise _map_openai_error(e)
+            raise _map_openai_error(e, self.display_name, getattr(self.client, "base_url", "") and str(self.client.base_url))
 
     async def generate_stream(
         self,
@@ -250,7 +295,7 @@ class OpenAICompatibleProvider(AIProvider):
                     await on_chunk(delta)
             return full_text
         except Exception as e:
-            raise _map_openai_error(e)
+            raise _map_openai_error(e, self.display_name, getattr(self.client, "base_url", "") and str(self.client.base_url))
 
 
 class OpenAIProvider(OpenAICompatibleProvider):
@@ -317,7 +362,7 @@ class GeminiProvider(AIProvider):
             text = response.text or "{}"
             return _extract_json(text)
         except Exception as e:
-            raise _map_generic_error(e, "Gemini")
+            raise _map_generic_error(e, "Gemini", "")
 
     async def generate_stream(
         self,
@@ -342,7 +387,7 @@ class GeminiProvider(AIProvider):
                     await on_chunk(chunk.text)
             return full_text
         except Exception as e:
-            raise _map_generic_error(e, "Gemini")
+            raise _map_generic_error(e, "Gemini", "")
 
 
 class DeepSeekProvider(OpenAICompatibleProvider):
@@ -447,9 +492,10 @@ class DashScopeProvider(OpenAICompatibleProvider):
     default_list_models_base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 
 
-async def _list_openai_compatible_models(api_key: str, base_url: str, default_base_url: str) -> list[str]:
+async def _list_openai_compatible_models(api_key: str, base_url: str, default_base_url: str, *, allow_localhost: bool = False) -> list[str]:
     import httpx
-    url = (base_url or default_base_url).rstrip("/") + "/v1/models"
+    normalized_base_url = _normalize_base_url(base_url, default_base_url, allow_localhost=allow_localhost)
+    url = normalized_base_url.rstrip("/") + "/v1/models"
     headers = {"Authorization": f"Bearer {api_key}"}
     async with httpx.AsyncClient(timeout=15) as client:
         resp = await client.get(url, headers=headers)
@@ -570,28 +616,34 @@ def _map_anthropic_error(e: Exception) -> ProviderError:
     return ProviderError(500, f"Unexpected error: {e}")
 
 
-def _map_openai_error(e: Exception) -> ProviderError:
+def _map_openai_error(e: Exception, provider_name: str = "API", base_url: str = "") -> ProviderError:
     try:
         from openai import AuthenticationError, RateLimitError, BadRequestError, APIConnectionError
         if isinstance(e, AuthenticationError):
-            return ProviderError(401, "API key is invalid. Check your API key configuration.")
+            return ProviderError(401, f"{provider_name} API key is invalid. Check your API key configuration.")
         if isinstance(e, RateLimitError):
-            return ProviderError(429, "Rate limited. Please wait and try again.")
+            return ProviderError(429, f"Rate limited by {provider_name}. Please wait and try again.")
         if isinstance(e, BadRequestError):
-            return ProviderError(400, f"API error: {str(e)[:200]}")
+            return ProviderError(400, f"{provider_name} API error: {str(e)[:200]}")
         if isinstance(e, APIConnectionError):
-            return ProviderError(503, "Cannot reach the API. Check your internet connection or base URL.")
+            if provider_name == "Ollama":
+                return ProviderError(503, _ollama_connection_message(base_url or "http://localhost:11434/v1"))
+            return ProviderError(503, f"Cannot reach the {provider_name} API. Check your internet connection or Base URL.")
     except ImportError:
         pass
-    return ProviderError(500, f"Unexpected error: {e}")
+    if provider_name == "Ollama":
+        return ProviderError(503, _ollama_connection_message(base_url or "http://localhost:11434/v1"))
+    return ProviderError(500, f"Unexpected {provider_name} error: {e}")
 
 
-def _map_generic_error(e: Exception, provider_name: str) -> ProviderError:
+def _map_generic_error(e: Exception, provider_name: str, base_url: str = "") -> ProviderError:
     msg = str(e).lower()
     if "auth" in msg or "key" in msg or "permission" in msg:
         return ProviderError(401, f"{provider_name} API key is invalid.")
     if "rate" in msg or "quota" in msg or "429" in msg:
         return ProviderError(429, f"Rate limited by {provider_name}. Please wait and try again.")
-    if "connect" in msg or "timeout" in msg or "network" in msg:
+    if "connect" in msg or "timeout" in msg or "network" in msg or "refused" in msg:
+        if provider_name == "Ollama":
+            return ProviderError(503, _ollama_connection_message(base_url or "http://localhost:11434/v1"))
         return ProviderError(503, f"Cannot reach {provider_name} API. Check your internet connection.")
     return ProviderError(500, f"{provider_name} error: {str(e)[:200]}")

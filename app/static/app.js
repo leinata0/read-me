@@ -1,17 +1,56 @@
 // README 生成器 — 前端逻辑
 
+function prependBanner(message) {
+    const banner = document.createElement('p');
+    banner.style.cssText = 'color:red;padding:1rem;background:#fff3f3;border-bottom:2px solid red;z-index:9999;position:relative';
+    banner.textContent = message;
+    document.body.prepend(banner);
+}
+
 window.onerror = function (msg, url, line) {
-    document.body.insertAdjacentHTML('afterbegin',
-        '<p style="color:red;padding:1rem;background:#fff3f3;border-bottom:2px solid red;z-index:9999;position:relative">' +
-        'JS 错误: ' + msg + ' (第 ' + line + ' 行)</p>');
+    prependBanner(`JS 错误: ${msg} (第 ${line} 行)`);
 };
 
 (function () {
     'use strict';
 
+    const keyStorage = {
+        getItem(key) {
+            try {
+                return sessionStorage.getItem(key);
+            } catch {
+                return null;
+            }
+        },
+        setItem(key, value) {
+            try {
+                sessionStorage.setItem(key, value);
+            } catch {
+                // ignore storage errors
+            }
+        }
+    };
+
+    const persistedStorage = {
+        getItem(key) {
+            try {
+                return localStorage.getItem(key);
+            } catch {
+                return null;
+            }
+        },
+        setItem(key, value) {
+            try {
+                localStorage.setItem(key, value);
+            } catch {
+                // ignore storage errors
+            }
+        }
+    };
+
     // 安全检查外部依赖
     if (typeof marked === 'undefined') {
-        document.body.insertAdjacentHTML('afterbegin', '<p style="color:red;padding:1rem">错误：marked.js 未加载，请检查网络连接后刷新页面。</p>');
+        prependBanner('错误：marked.js 未加载，请检查网络连接后刷新页面。');
         return;
     }
 
@@ -219,33 +258,35 @@ window.onerror = function (msg, url, line) {
         if (typeof DOMPurify !== 'undefined') {
             return DOMPurify.sanitize(html);
         }
-        return html;
+        const pre = document.createElement('pre');
+        pre.textContent = md || '';
+        return pre.outerHTML;
     }
 
     // ========== API Key 管理 ==========
 
     function loadSavedKeys() {
         try {
-            return JSON.parse(localStorage.getItem(LS_KEYS) || '{}');
+            return JSON.parse(keyStorage.getItem(LS_KEYS) || '{}');
         } catch {
             return {};
         }
     }
 
     function saveKeys(keys) {
-        localStorage.setItem(LS_KEYS, JSON.stringify(keys));
+        keyStorage.setItem(LS_KEYS, JSON.stringify(keys));
     }
 
     function loadSettings() {
         try {
-            return JSON.parse(localStorage.getItem(LS_SETTINGS) || '{}');
+            return JSON.parse(persistedStorage.getItem(LS_SETTINGS) || '{}');
         } catch {
             return {};
         }
     }
 
     function saveSettings(settings) {
-        localStorage.setItem(LS_SETTINGS, JSON.stringify(settings));
+        persistedStorage.setItem(LS_SETTINGS, JSON.stringify(settings));
     }
 
     function applySettingsToUI() {
@@ -425,8 +466,8 @@ window.onerror = function (msg, url, line) {
 
     function renderProviderSelect() {
         providerSelect.innerHTML = '';
-        const savedProvider = localStorage.getItem(LS_PROVIDER);
-        const savedModel = localStorage.getItem(LS_MODEL);
+        const savedProvider = persistedStorage.getItem(LS_PROVIDER);
+        const savedModel = persistedStorage.getItem(LS_MODEL);
 
         providersData.forEach(p => {
             const ready = isProviderReady(p);
@@ -568,17 +609,17 @@ window.onerror = function (msg, url, line) {
     providerSelect.addEventListener('change', () => {
         updateModelSelect();
         updateKeyStatus();
-        localStorage.setItem(LS_PROVIDER, providerSelect.value);
+        persistedStorage.setItem(LS_PROVIDER, providerSelect.value);
     });
 
     modelInput.addEventListener('change', () => {
-        localStorage.setItem(LS_MODEL, modelInput.value.trim());
+        persistedStorage.setItem(LS_MODEL, modelInput.value.trim());
     });
 
     modelInput.addEventListener('input', () => {
         clearTimeout(_refreshTimer);
         _refreshTimer = setTimeout(() => {
-            localStorage.setItem(LS_MODEL, modelInput.value.trim());
+            persistedStorage.setItem(LS_MODEL, modelInput.value.trim());
         }, 500);
     });
 
@@ -652,6 +693,17 @@ window.onerror = function (msg, url, line) {
     const testStatusText = document.getElementById('test-status-text');
     let testStatusTimer = null;
 
+    function formatConnectionError(message, provider) {
+        if (!message) return '连接失败';
+        if (provider === 'ollama' && /Cannot reach Ollama/i.test(message)) {
+            return `${message} 请先启动 Ollama，再重试「测试连接」。`;
+        }
+        if (/Base URL/i.test(message)) {
+            return `${message} 请检查 Base URL 是否填写正确。`;
+        }
+        return message;
+    }
+
     function showTestStatus(msg, isError) {
         clearTimeout(testStatusTimer);
         testStatus.style.display = '';
@@ -700,7 +752,7 @@ window.onerror = function (msg, url, line) {
             if (data.ok) {
                 showTestStatus(data.message, false);
             } else {
-                showTestStatus(`[${data.code}] ${data.message}`, true);
+                showTestStatus(formatConnectionError(`[${data.code}] ${data.message}`, provider), true);
             }
         } catch (err) {
             showTestStatus('连接失败: ' + err.message, true);
@@ -715,6 +767,8 @@ window.onerror = function (msg, url, line) {
     form.addEventListener('submit', async (e) => {
         e.preventDefault();
         hideError();
+        const feedbackText = feedbackInput.value.trim();
+        const previousReadme = feedbackText ? (readmeSource.value || currentReadme) : '';
         previewSection.style.display = 'none';
         progressSection.style.display = '';
         resetSteps();
@@ -743,8 +797,8 @@ window.onerror = function (msg, url, line) {
             custom_prompt_suffix: savedSettings.custom_prompt_suffix || '',
             include_patterns: savedSettings.include_patterns || '',
             exclude_patterns: savedSettings.exclude_patterns || '',
-            feedback: feedbackInput.value.trim(),
-            previous_readme: feedbackInput.value.trim() ? currentReadme : '',
+            feedback: feedbackText,
+            previous_readme: previousReadme,
             badge_style: savedSettings.badge_style || 'shields',
             toc_depth: savedSettings.toc_depth ?? 2,
             code_examples: savedSettings.code_examples || 'normal',
@@ -905,7 +959,7 @@ window.onerror = function (msg, url, line) {
     }
 
     (function initTheme() {
-        const saved = localStorage.getItem(LS_THEME);
+        const saved = persistedStorage.getItem(LS_THEME);
         const theme = saved || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
         applyTheme(theme);
     })();
@@ -914,7 +968,7 @@ window.onerror = function (msg, url, line) {
         const current = document.documentElement.getAttribute('data-theme');
         const next = current === 'dark' ? 'light' : 'dark';
         applyTheme(next);
-        localStorage.setItem(LS_THEME, next);
+        persistedStorage.setItem(LS_THEME, next);
     });
 
     // ========== 取消生成 ==========
@@ -962,7 +1016,7 @@ window.onerror = function (msg, url, line) {
 
     function loadHistory() {
         try {
-            return JSON.parse(localStorage.getItem(LS_HISTORY) || '[]');
+            return JSON.parse(persistedStorage.getItem(LS_HISTORY) || '[]');
         } catch { return []; }
     }
 
@@ -970,14 +1024,14 @@ window.onerror = function (msg, url, line) {
         const history = loadHistory();
         history.unshift(entry);
         if (history.length > 10) history.length = 10;
-        localStorage.setItem(LS_HISTORY, JSON.stringify(history));
+        persistedStorage.setItem(LS_HISTORY, JSON.stringify(history));
         renderHistory();
     }
 
     function deleteHistory(index) {
         const history = loadHistory();
         history.splice(index, 1);
-        localStorage.setItem(LS_HISTORY, JSON.stringify(history));
+        persistedStorage.setItem(LS_HISTORY, JSON.stringify(history));
         renderHistory();
     }
 

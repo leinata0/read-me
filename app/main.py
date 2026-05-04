@@ -97,8 +97,9 @@ async def api_test_connection(req: AnalyzeRequest):
 
 
 @app.post("/api/analyze")
-async def api_analyze(req: AnalyzeRequest):
+async def api_analyze(req: AnalyzeRequest, request: Request):
     queue: asyncio.Queue[str | None] = asyncio.Queue()
+    stream_closed = False
 
     _step_map = {
         "校验": "validate", "路径": "validate", "Validating": "validate",
@@ -107,6 +108,15 @@ async def api_analyze(req: AnalyzeRequest):
         "生成": "generate", "Generating": "generate", "README": "generate",
     }
 
+    async def push_event(payload: str | None):
+        nonlocal stream_closed
+        if stream_closed:
+            return
+        if await request.is_disconnected():
+            stream_closed = True
+            raise asyncio.CancelledError
+        await queue.put(payload)
+
     async def on_progress(detail: str):
         step = ""
         for keyword, step_name in _step_map.items():
@@ -114,11 +124,11 @@ async def api_analyze(req: AnalyzeRequest):
                 step = step_name
                 break
         data = json.dumps({"detail": detail, "step": step}, ensure_ascii=False)
-        await queue.put(f"event: progress\ndata: {data}\n\n")
+        await push_event(f"event: progress\ndata: {data}\n\n")
 
     async def on_chunk(text: str):
         data = json.dumps({"text": text}, ensure_ascii=False)
-        await queue.put(f"event: chunk\ndata: {data}\n\n")
+        await push_event(f"event: chunk\ndata: {data}\n\n")
 
     async def background_task():
         try:
@@ -146,7 +156,10 @@ async def api_analyze(req: AnalyzeRequest):
                 audience=req.audience,
             )
             done_data = json.dumps({"model": result.model, "provider": result.provider}, ensure_ascii=False)
-            await queue.put(f"event: done\ndata: {done_data}\n\n")
+            await push_event(f"event: done\ndata: {done_data}\n\n")
+        except asyncio.CancelledError:
+            logging.info("README generation cancelled after client disconnect")
+            raise
         except ProviderError as e:
             detail = e.message
             detail += f" (渠道: {req.provider}, 模型: {req.model or '默认'})"
@@ -154,27 +167,43 @@ async def api_analyze(req: AnalyzeRequest):
             if keys and keys.base_url:
                 detail += f", Base URL: {keys.base_url}"
             err = json.dumps({"code": e.code, "message": detail}, ensure_ascii=False)
-            await queue.put(f"event: error\ndata: {err}\n\n")
+            await push_event(f"event: error\ndata: {err}\n\n")
         except (FileNotFoundError, ValueError) as e:
             err = json.dumps({"code": 404, "message": str(e)}, ensure_ascii=False)
-            await queue.put(f"event: error\ndata: {err}\n\n")
+            await push_event(f"event: error\ndata: {err}\n\n")
         except PermissionError as e:
             err = json.dumps({"code": 403, "message": f"Permission denied: {e}"}, ensure_ascii=False)
-            await queue.put(f"event: error\ndata: {err}\n\n")
+            await push_event(f"event: error\ndata: {err}\n\n")
         except Exception as e:
             err = json.dumps({"code": 500, "message": str(e)[:300]}, ensure_ascii=False)
-            await queue.put(f"event: error\ndata: {err}\n\n")
+            await push_event(f"event: error\ndata: {err}\n\n")
         finally:
             await queue.put(None)
 
     async def event_stream() -> AsyncGenerator[str, None]:
+        nonlocal stream_closed
         task = asyncio.create_task(background_task())
-        while True:
-            item = await queue.get()
-            if item is None:
-                break
-            yield item
-        await task
+        try:
+            while True:
+                if await request.is_disconnected():
+                    stream_closed = True
+                    task.cancel()
+                    break
+                try:
+                    item = await asyncio.wait_for(queue.get(), timeout=0.25)
+                except asyncio.TimeoutError:
+                    continue
+                if item is None:
+                    break
+                yield item
+        finally:
+            stream_closed = True
+            if not task.done():
+                task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
