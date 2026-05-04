@@ -716,6 +716,16 @@ window.onerror = function (msg, url, line) {
         }
     }
 
+    function showInfoStatus(msg) {
+        clearTimeout(testStatusTimer);
+        testStatus.style.display = '';
+        testStatusText.textContent = msg;
+        testStatusText.style.color = 'var(--pico-muted-color)';
+        testStatusTimer = setTimeout(() => {
+            testStatus.style.display = 'none';
+        }, 2500);
+    }
+
     function hideTestStatus() {
         clearTimeout(testStatusTimer);
         testStatus.style.display = 'none';
@@ -853,7 +863,8 @@ window.onerror = function (msg, url, line) {
             }
         } catch (err) {
             if (err.name === 'AbortError') {
-                showError('生成已取消');
+                hideError();
+                showInfoStatus('生成已取消');
             } else {
                 showError(`连接错误: ${err.message}`);
             }

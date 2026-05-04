@@ -18,6 +18,10 @@ build/
 htmlcov/
 .pytest_cache/
 .mypy_cache/
+.pytest-temp/
+
+# Browser automation
+.playwright-cli/
 
 # IDE
 .idea/
