@@ -176,14 +176,16 @@ window.onerror = function (msg, url, line) {
         if (typeof hljs !== 'undefined' && typeof marked.use === 'function') {
             marked.use({
                 renderer: {
-                    code({ text, lang }) {
-                        let highlighted = text;
+                    code: function (token) {
+                        var text = token.text || token;
+                        var lang = token.lang || '';
+                        var highlighted = text;
                         if (lang && hljs.getLanguage(lang)) {
                             highlighted = hljs.highlight(text, { language: lang }).value;
                         } else if (!lang) {
                             highlighted = hljs.highlightAuto(text).value;
                         }
-                        return `<pre><code class="hljs${lang ? ' language-' + lang : ''}">${highlighted}</code></pre>`;
+                        return '<pre><code class="hljs' + (lang ? ' language-' + lang : '') + '">' + highlighted + '</code></pre>';
                     }
                 }
             });
