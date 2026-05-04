@@ -168,8 +168,11 @@ async def api_analyze(req: AnalyzeRequest, request: Request):
                 detail += f", Base URL: {keys.base_url}"
             err = json.dumps({"code": e.code, "message": detail}, ensure_ascii=False)
             await push_event(f"event: error\ndata: {err}\n\n")
-        except (FileNotFoundError, ValueError) as e:
+        except FileNotFoundError as e:
             err = json.dumps({"code": 404, "message": str(e)}, ensure_ascii=False)
+            await push_event(f"event: error\ndata: {err}\n\n")
+        except ValueError as e:
+            err = json.dumps({"code": 400, "message": str(e)}, ensure_ascii=False)
             await push_event(f"event: error\ndata: {err}\n\n")
         except PermissionError as e:
             err = json.dumps({"code": 403, "message": f"Permission denied: {e}"}, ensure_ascii=False)

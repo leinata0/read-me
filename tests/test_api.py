@@ -22,6 +22,7 @@ def test_api_analyze_rejects_sensitive_directory():
     assert response.status_code == 200
     body = response.text
     assert "event: error" in body
+    assert '"code": 400' in body
     assert "personal or sensitive directory" in body
 
 
