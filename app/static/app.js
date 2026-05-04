@@ -779,7 +779,6 @@ window.onerror = function (msg, url, line) {
 
         const savedSettings = loadSettings();
         const body = {
-            folder_path: '.',
             provider: provider,
             model: modelInput.value.trim() || null,
             api_keys: getEffectiveApiKeys(),
@@ -1080,6 +1079,28 @@ window.onerror = function (msg, url, line) {
         renderHistory();
     }
 
+    function restoreHistoryEntry(entry) {
+        if (!entry) return;
+        folderInput.value = entry.folder_path || '';
+
+        if (entry.provider && providersData.some(p => p.name === entry.provider && isProviderReady(p))) {
+            providerSelect.value = entry.provider;
+            persistedStorage.setItem(LS_PROVIDER, entry.provider);
+        }
+        updateModelSelect(entry.model || persistedStorage.getItem(LS_MODEL));
+        if (entry.model) {
+            modelInput.value = entry.model;
+            persistedStorage.setItem(LS_MODEL, entry.model);
+        }
+        updateKeyStatus();
+        hideModelHint();
+
+        currentReadme = entry.readme || '';
+        readmePreview.innerHTML = safeRender(currentReadme);
+        readmeSource.value = currentReadme;
+        previewSection.style.display = '';
+    }
+
     function renderHistory() {
         const history = loadHistory();
         if (history.length === 0) {
@@ -1110,21 +1131,10 @@ window.onerror = function (msg, url, line) {
         historyList.querySelectorAll('[data-action="restore"]').forEach(btn => {
             btn.addEventListener('click', () => {
                 const idx = parseInt(btn.dataset.index);
-                const entry = loadHistory()[idx];
-                if (entry) {
-                    currentReadme = entry.readme;
-                    readmePreview.innerHTML = safeRender(currentReadme);
-                    readmeSource.value = currentReadme;
-                    previewSection.style.display = '';
-                }
+                restoreHistoryEntry(loadHistory()[idx]);
             });
         });
 
-        historyList.querySelectorAll('[data-action="delete"]').forEach(btn => {
-            btn.addEventListener('click', () => {
-                deleteHistory(parseInt(btn.dataset.index));
-            });
-        });
     }
 
     // ========== 初始化 ==========
