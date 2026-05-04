@@ -70,6 +70,40 @@ async def api_list_models(provider_name: str, req: ListModelsRequest):
         return ListModelsResponse(models=cls.available_models, source="fallback", error=str(e)[:200])
 
 
+@app.post("/api/test-connection")
+async def api_test_connection(req: AnalyzeRequest):
+    """Test if the API key and connection work for the selected provider."""
+    import time as _time
+    try:
+        provider = get_provider(req.provider, req.model, req.api_keys)
+        start = _time.time()
+        result = await provider.analyze(
+            system_prompt="You are a test assistant. Respond with a short confirmation.",
+            user_prompt='Respond with exactly: {"status":"ok"}',
+            json_schema={"type": "object", "properties": {"status": {"type": "string"}}},
+        )
+        elapsed = round(_time.time() - start, 2)
+        return JSONResponse(content={
+            "ok": True,
+            "model": provider.model,
+            "provider": provider.name,
+            "elapsed_seconds": elapsed,
+            "message": f"连接成功！模型 {provider.model} 响应正常（{elapsed}s）",
+        })
+    except ProviderError as e:
+        return JSONResponse(status_code=e.code, content={
+            "ok": False,
+            "code": e.code,
+            "message": e.message,
+        })
+    except Exception as e:
+        return JSONResponse(status_code=500, content={
+            "ok": False,
+            "code": 500,
+            "message": f"测试失败: {str(e)[:200]}",
+        })
+
+
 @app.post("/api/analyze")
 async def api_analyze(req: AnalyzeRequest):
     queue: asyncio.Queue[str | None] = asyncio.Queue()

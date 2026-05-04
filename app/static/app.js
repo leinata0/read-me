@@ -31,6 +31,7 @@
     const readmeSource = document.getElementById('readme-source');
     const downloadBtn = document.getElementById('download-btn');
     const regenerateBtn = document.getElementById('regenerate-btn');
+    const testBtn = document.getElementById('test-btn');
     const tabBtns = document.querySelectorAll('.tab-btn');
     const settingsBtn = document.getElementById('settings-btn');
     const settingsDialog = document.getElementById('settings-dialog');
@@ -515,9 +516,71 @@
 
     function hideError() {
         errorSection.style.display = 'none';
+        errorSection.style.borderColor = '';
+        errorMessage.style.color = '';
     }
 
     errorDismissBtn.addEventListener('click', hideError);
+
+    // ========== 测试连接 ==========
+
+    testBtn.addEventListener('click', async () => {
+        hideError();
+        const provider = providerSelect.value;
+        if (!provider) {
+            showError('请先选择一个 AI 渠道');
+            return;
+        }
+
+        testBtn.disabled = true;
+        testBtn.setAttribute('aria-busy', 'true');
+        testBtn.textContent = '测试中...';
+
+        const savedSettings = loadSettings();
+        const body = {
+            folder_path: '.',
+            provider: provider,
+            model: modelInput.value.trim() || null,
+            api_keys: getEffectiveApiKeys(),
+            language: savedSettings.language || 'zh',
+        };
+
+        try {
+            const res = await fetch('/api/test-connection', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+            });
+            const data = await res.json();
+            if (data.ok) {
+                showSuccess(data.message);
+            } else {
+                showError(`[${data.code}] ${data.message}`);
+            }
+        } catch (err) {
+            showError(`连接失败: ${err.message}`);
+        } finally {
+            testBtn.disabled = false;
+            testBtn.removeAttribute('aria-busy');
+            testBtn.textContent = '测试连接';
+        }
+    });
+
+    function showSuccess(msg) {
+        const errorSection = document.getElementById('error-section');
+        const errorMessage = document.getElementById('error-message');
+        // 临时复用 error 区域显示成功信息
+        errorSection.style.display = '';
+        errorSection.style.borderColor = '#27ae60';
+        errorMessage.style.color = '#27ae60';
+        errorMessage.textContent = msg;
+        // 3 秒后自动隐藏
+        setTimeout(() => {
+            errorSection.style.display = 'none';
+            errorSection.style.borderColor = '';
+            errorMessage.style.color = '';
+        }, 5000);
+    }
 
     // ========== 表单提交与 SSE ==========
 
