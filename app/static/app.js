@@ -579,7 +579,9 @@ window.onerror = function (msg, url, line) {
     }
 
     console.log('[README-GEN] testBtn =', testBtn);
-    testBtn.addEventListener('click', async () => {
+
+    // 暴露到 window 供 onclick 调用
+    window.__testConnection = async function () {
         console.log('[README-GEN] 测试连接按钮被点击');
         hideError();
         hideTestStatus();
@@ -619,7 +621,7 @@ window.onerror = function (msg, url, line) {
             testBtn.disabled = false;
             testBtn.textContent = '测试连接';
         }
-    });
+    };
     console.log('[README-GEN] 所有事件监听器已注册');
 
     // ========== 表单提交与 SSE ==========
