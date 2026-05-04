@@ -129,6 +129,20 @@ class ListModelsResponse(BaseModel):
     error: str = ""
 
 
+class TestConnectionRequest(BaseModel):
+    provider: str | None = None
+    model: str | None = None
+    api_keys: dict[str, ProviderKeys] = Field(default_factory=dict)
+    language: str = "zh"
+
+    @field_validator("provider", "model", "language")
+    @classmethod
+    def trim_strings(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return value.strip()
+
+
 class GenerateResponse(BaseModel):
     readme: str
     model: str

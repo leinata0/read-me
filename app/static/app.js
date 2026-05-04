@@ -66,9 +66,11 @@ window.onerror = function (msg, url, line) {
     const form = document.getElementById('analyze-form');
     const folderInput = document.getElementById('folder-path');
     const providerSelect = document.getElementById('provider-select');
+
     const modelInput = document.getElementById('model-input');
     const modelDatalist = document.getElementById('model-datalist');
     const refreshModelsBtn = document.getElementById('refresh-models-btn');
+    const modelHint = document.getElementById('model-hint');
     const generateBtn = document.getElementById('generate-btn');
     const progressSection = document.getElementById('progress-section');
     const pipelineSteps = document.getElementById('pipeline-steps');
@@ -339,9 +341,10 @@ window.onerror = function (msg, url, line) {
         const result = {};
         providersData.forEach(p => {
             const local = saved[p.name] || {};
-            if (local.api_key) {
+            const hasProviderConfig = !!local.api_key || !!local.base_url;
+            if (hasProviderConfig) {
                 result[p.name] = {
-                    api_key: local.api_key,
+                    api_key: local.api_key || '',
                     base_url: local.base_url || '',
                     max_tokens_analyze: local.max_tokens_analyze || 16384,
                     max_tokens_generate: local.max_tokens_generate || 32768,
@@ -355,7 +358,7 @@ window.onerror = function (msg, url, line) {
     function isProviderReady(p) {
         const saved = loadSavedKeys();
         const local = saved[p.name] || {};
-        return p.is_configured || !!local.api_key || !p.env_key_hint;
+        return p.is_configured || !!local.api_key || !!local.base_url || !p.env_key_hint;
     }
 
     // ========== 设置弹窗 ==========
@@ -437,13 +440,24 @@ window.onerror = function (msg, url, line) {
             keys[provider][field] = input.value.trim();
         });
         Object.keys(keys).forEach(p => {
-            if (!keys[p].api_key) delete keys[p];
-            else {
-                if (!keys[p].base_url) delete keys[p].base_url;
-                keys[p].max_tokens_analyze = settings.max_tokens_analyze;
-                keys[p].max_tokens_generate = settings.max_tokens_generate;
-                keys[p].temperature = settings.temperature;
+            const provider = providersData.find(item => item.name === p);
+            const requiresApiKey = !!provider?.env_key_hint;
+            const hasApiKey = !!keys[p].api_key;
+            const hasBaseUrl = !!keys[p].base_url;
+
+            if (requiresApiKey && !hasApiKey) {
+                delete keys[p];
+                return;
             }
+            if (!requiresApiKey && !hasApiKey && !hasBaseUrl) {
+                delete keys[p];
+                return;
+            }
+
+            if (!keys[p].base_url) delete keys[p].base_url;
+            keys[p].max_tokens_analyze = settings.max_tokens_analyze;
+            keys[p].max_tokens_generate = settings.max_tokens_generate;
+            keys[p].temperature = settings.temperature;
         });
         saveKeys(keys);
         settingsDialog.close();
@@ -493,6 +507,7 @@ window.onerror = function (msg, url, line) {
     function updateModelSelect(savedModel) {
         const selected = providersData.find(p => p.name === providerSelect.value);
         modelDatalist.innerHTML = '';
+        hideModelHint();
 
         if (!selected) {
             modelInput.value = '';
@@ -565,17 +580,14 @@ window.onerror = function (msg, url, line) {
             const modelHint = document.getElementById('model-hint');
             if (data.source === 'fetched') {
                 refreshModelsBtn.title = '模型列表已从 API 获取';
-                if (modelHint) modelHint.style.display = 'none';
+                hideModelHint();
             } else if (data.error) {
                 refreshModelsBtn.title = '获取失败：' + data.error;
-                if (modelHint) {
-                    modelHint.style.display = '';
-                    modelHint.textContent = data.error;
-                }
+                    showModelHint(data.error);
                 modelInput.placeholder = '手动输入模型名称';
             } else {
                 refreshModelsBtn.title = '使用默认模型列表';
-                if (modelHint) modelHint.style.display = 'none';
+                hideModelHint();
             }
         } catch (err) {
             console.warn('获取模型列表失败:', err.message);
@@ -587,6 +599,20 @@ window.onerror = function (msg, url, line) {
 
     // ========== Key 状态 ==========
 
+    function hideModelHint() {
+        if (modelHint) {
+            modelHint.style.display = 'none';
+            modelHint.textContent = '';
+        }
+    }
+
+    function showModelHint(message) {
+        if (modelHint) {
+            modelHint.style.display = '';
+            modelHint.textContent = message;
+        }
+    }
+
     function updateKeyStatus() {
         const p = providersData.find(p => p.name === providerSelect.value);
         if (!p) { keyStatus.style.display = 'none'; return; }
@@ -594,20 +620,28 @@ window.onerror = function (msg, url, line) {
         const saved = loadSavedKeys();
         const local = saved[p.name] || {};
         const source = local.api_key ? '本地' : (p.is_configured ? '环境变量' : '');
+        const requiresApiKey = !!p.env_key_hint;
 
+        keyStatus.style.display = '';
         if (source) {
-            keyStatus.style.display = '';
             keyStatusText.innerHTML = `&#10003; API Key：<strong>${source}</strong>${local.base_url ? ' | Base URL: ' + escapeHtml(local.base_url) : ''}`;
             keyStatusText.style.color = '#27ae60';
-        } else {
-            keyStatus.style.display = '';
-            keyStatusText.innerHTML = '&#10007; 未配置 API Key，点击齿轮图标进行设置';
-            keyStatusText.style.color = '#e74c3c';
+            return;
         }
+        if (!requiresApiKey) {
+            keyStatusText.innerHTML = local.base_url
+                ? `&#10003; 已使用本地配置${' | Base URL: ' + escapeHtml(local.base_url)}`
+                : '&#10003; 此渠道无需 API Key';
+            keyStatusText.style.color = '#27ae60';
+            return;
+        }
+        keyStatusText.innerHTML = '&#10007; 未配置 API Key，点击齿轮图标进行设置';
+        keyStatusText.style.color = '#e74c3c';
     }
 
     providerSelect.addEventListener('change', () => {
         updateModelSelect();
+        hideModelHint();
         updateKeyStatus();
         persistedStorage.setItem(LS_PROVIDER, providerSelect.value);
     });

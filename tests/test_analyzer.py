@@ -13,12 +13,11 @@ def test_validate_path_accepts_project_directory():
 
 
 def test_validate_path_rejects_sensitive_directory():
-    downloads = Path.home() / "Downloads"
-    if not downloads.exists():
-        pytest.skip("Downloads directory does not exist in this environment")
+    home = Path.home()
+    sensitive_dir = home / "Downloads" if (home / "Downloads").exists() else home
 
     with pytest.raises(ValueError, match="personal or sensitive directory"):
-        validate_path(str(downloads))
+        validate_path(str(sensitive_dir))
 
 
 def test_validate_path_rejects_non_project_directory():

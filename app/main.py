@@ -13,7 +13,7 @@ from fastapi.responses import HTMLResponse, StreamingResponse, Response, JSONRes
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from app.models import AnalyzeRequest, ProviderError, ListModelsRequest, ListModelsResponse
+from app.models import AnalyzeRequest, ProviderError, ListModelsRequest, ListModelsResponse, TestConnectionRequest
 from app.providers import get_provider, list_providers, PROVIDERS
 from app.generator import run_pipeline
 
@@ -63,7 +63,7 @@ async def api_list_models(provider_name: str, req: ListModelsRequest):
 
 
 @app.post("/api/test-connection")
-async def api_test_connection(req: AnalyzeRequest):
+async def api_test_connection(req: TestConnectionRequest):
     """Test if the API key and connection work for the selected provider."""
     import time as _time
     try:

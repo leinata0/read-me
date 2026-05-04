@@ -102,7 +102,6 @@ def test_api_test_connection_returns_provider_error(monkeypatch):
     response = client.post(
         "/api/test-connection",
         json={
-            "folder_path": ".",
             "provider": "ollama",
             "model": "qwen2.5:7b",
         },
