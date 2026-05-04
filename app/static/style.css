@@ -297,6 +297,18 @@
     cursor: not-allowed;
 }
 
+.test-status {
+    margin-top: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    border-radius: var(--pico-border-radius);
+    border: 1px solid;
+    text-align: center;
+}
+
+.test-status small {
+    font-size: 0.85rem;
+}
+
 hgroup {
     text-align: center;
     margin-bottom: 2rem;

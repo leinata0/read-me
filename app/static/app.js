@@ -524,16 +524,37 @@
 
     // ========== 测试连接 ==========
 
+    const testStatus = document.getElementById('test-status');
+    const testStatusText = document.getElementById('test-status-text');
+    let testStatusTimer = null;
+
+    function showTestStatus(msg, isError) {
+        clearTimeout(testStatusTimer);
+        testStatus.style.display = '';
+        testStatusText.textContent = msg;
+        testStatusText.style.color = isError ? '#e74c3c' : '#27ae60';
+        if (!isError) {
+            testStatusTimer = setTimeout(() => {
+                testStatus.style.display = 'none';
+            }, 5000);
+        }
+    }
+
+    function hideTestStatus() {
+        clearTimeout(testStatusTimer);
+        testStatus.style.display = 'none';
+    }
+
     testBtn.addEventListener('click', async () => {
         hideError();
+        hideTestStatus();
         const provider = providerSelect.value;
         if (!provider) {
-            showError('请先选择一个 AI 渠道');
+            showTestStatus('请先选择一个 AI 渠道', true);
             return;
         }
 
         testBtn.disabled = true;
-        testBtn.setAttribute('aria-busy', 'true');
         testBtn.textContent = '测试中...';
 
         const savedSettings = loadSettings();
@@ -553,34 +574,17 @@
             });
             const data = await res.json();
             if (data.ok) {
-                showSuccess(data.message);
+                showTestStatus(data.message, false);
             } else {
-                showError(`[${data.code}] ${data.message}`);
+                showTestStatus(`[${data.code}] ${data.message}`, true);
             }
         } catch (err) {
-            showError(`连接失败: ${err.message}`);
+            showTestStatus('连接失败: ' + err.message, true);
         } finally {
             testBtn.disabled = false;
-            testBtn.removeAttribute('aria-busy');
             testBtn.textContent = '测试连接';
         }
     });
-
-    function showSuccess(msg) {
-        const errorSection = document.getElementById('error-section');
-        const errorMessage = document.getElementById('error-message');
-        // 临时复用 error 区域显示成功信息
-        errorSection.style.display = '';
-        errorSection.style.borderColor = '#27ae60';
-        errorMessage.style.color = '#27ae60';
-        errorMessage.textContent = msg;
-        // 3 秒后自动隐藏
-        setTimeout(() => {
-            errorSection.style.display = 'none';
-            errorSection.style.borderColor = '';
-            errorMessage.style.color = '';
-        }, 5000);
-    }
 
     // ========== 表单提交与 SSE ==========
 
