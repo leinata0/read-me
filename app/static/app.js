@@ -8,12 +8,14 @@ window.onerror = function (msg, url, line) {
 
 (function () {
     'use strict';
+    console.log('[README-GEN] IIFE 开始执行');
 
     // 安全检查外部依赖
     if (typeof marked === 'undefined') {
         document.body.insertAdjacentHTML('afterbegin', '<p style="color:red;padding:1rem">错误：marked.js 未加载，请检查网络连接后刷新页面。</p>');
         return;
     }
+    console.log('[README-GEN] marked 已加载');
 
     // --- 常量 ---
     const LS_KEYS = 'readme-gen-keys';
@@ -193,6 +195,7 @@ window.onerror = function (msg, url, line) {
     } catch (e) {
         console.warn('Marked 配置失败，使用默认配置:', e);
     }
+    console.log('[README-GEN] Marked 配置完成');
 
     // --- 安全渲染（DOMPurify 可选） ---
     function safeRender(md) {
@@ -575,7 +578,9 @@ window.onerror = function (msg, url, line) {
         testStatus.style.display = 'none';
     }
 
+    console.log('[README-GEN] testBtn =', testBtn);
     testBtn.addEventListener('click', async () => {
+        console.log('[README-GEN] 测试连接按钮被点击');
         hideError();
         hideTestStatus();
         const provider = providerSelect.value;
@@ -615,6 +620,7 @@ window.onerror = function (msg, url, line) {
             testBtn.textContent = '测试连接';
         }
     });
+    console.log('[README-GEN] 所有事件监听器已注册');
 
     // ========== 表单提交与 SSE ==========
 
@@ -787,4 +793,5 @@ window.onerror = function (msg, url, line) {
 
     // ========== 初始化 ==========
     loadProviders();
+    console.log('[README-GEN] IIFE 执行完毕');
 })();
