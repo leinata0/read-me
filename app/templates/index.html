@@ -149,11 +149,15 @@
     <dialog id="settings-dialog">
         <article>
             <header>
-                <h3>设置</h3>
+                <div class="settings-tabs">
+                    <button class="settings-tab active" data-stab="basic">基本设置</button>
+                    <button class="settings-tab" data-stab="advanced">高级设置</button>
+                    <button class="settings-tab" data-stab="apikey">API Key</button>
+                </div>
             </header>
-            <details class="settings-group" open>
-                <summary class="settings-group-title">基本设置</summary>
-                <div class="settings-grid settings-grid-4">
+
+            <div id="stab-basic" class="settings-tab-content active">
+                <div class="settings-row">
                     <div>
                         <label for="setting-language">README 语言</label>
                         <select id="setting-language">
@@ -169,8 +173,10 @@
                             <option value="technical">高度技术</option>
                         </select>
                     </div>
-                    <div>
-                        <label for="setting-temperature">温度 <span id="temp-value">0.7</span></label>
+                </div>
+                <div class="settings-row">
+                    <div class="slider-wrap">
+                        <label for="setting-temperature">温度 <output id="temp-value">0.7</output></label>
                         <input type="range" id="setting-temperature" min="0" max="2" step="0.1" value="0.7">
                     </div>
                     <div class="checkbox-wrap">
@@ -180,10 +186,10 @@
                         </label>
                     </div>
                 </div>
-            </details>
-            <details class="settings-group">
-                <summary class="settings-group-title">高级设置</summary>
-                <div class="settings-grid">
+            </div>
+
+            <div id="stab-advanced" class="settings-tab-content">
+                <div class="settings-row">
                     <div>
                         <label for="setting-max-analyze">分析 max_tokens</label>
                         <input type="number" id="setting-max-analyze" min="4096" max="131072" step="1024" value="16384">
@@ -192,34 +198,38 @@
                         <label for="setting-max-generate">生成 max_tokens</label>
                         <input type="number" id="setting-max-generate" min="4096" max="131072" step="1024" value="32768">
                     </div>
+                </div>
+                <div class="settings-row">
                     <div>
                         <label for="setting-custom-sections">自定义章节</label>
-                        <input type="text" id="setting-custom-sections" placeholder="如: FAQ,Changelog,Contributing">
+                        <input type="text" id="setting-custom-sections" placeholder="如: FAQ,Changelog">
                     </div>
                     <div>
                         <label for="setting-exclude-sections">排除章节</label>
                         <input type="text" id="setting-exclude-sections" placeholder="如: License,Badges">
                     </div>
                 </div>
-                <div class="settings-grid" style="margin-top:0.75rem">
+                <div class="settings-row">
                     <div>
-                        <label for="setting-include-patterns">包含文件模式</label>
-                        <input type="text" id="setting-include-patterns" placeholder="如: *.py,*.js（留空=全部）">
+                        <label for="setting-include-patterns">包含文件</label>
+                        <input type="text" id="setting-include-patterns" placeholder="*.py,*.js">
                     </div>
                     <div>
-                        <label for="setting-exclude-patterns">排除文件模式</label>
-                        <input type="text" id="setting-exclude-patterns" placeholder="如: *.test.js,vendor/*">
+                        <label for="setting-exclude-patterns">排除文件</label>
+                        <input type="text" id="setting-exclude-patterns" placeholder="*.test.js,vendor/*">
                     </div>
                 </div>
-                <div style="margin-top:0.75rem">
-                    <label for="setting-custom-prompt">自定义 Prompt 追加</label>
-                    <textarea id="setting-custom-prompt" rows="3" placeholder="在生成 prompt 末尾追加的自定义指令..." style="font-size:0.85rem"></textarea>
+                <div>
+                    <label for="setting-custom-prompt">自定义 Prompt</label>
+                    <textarea id="setting-custom-prompt" rows="2" placeholder="在生成指令末尾追加的内容..." style="font-size:0.85rem"></textarea>
                 </div>
-            </details>
-            <details class="settings-group" open>
-                <summary class="settings-group-title">API Key 配置</summary>
+            </div>
+
+            <div id="stab-apikey" class="settings-tab-content">
+                <input type="text" id="provider-search" placeholder="搜索渠道..." style="margin-bottom:0.5rem;font-size:0.85rem">
                 <div id="settings-body"></div>
-            </details>
+            </div>
+
             <footer>
                 <div class="grid">
                     <button id="settings-save-btn" class="contrast">保存</button>

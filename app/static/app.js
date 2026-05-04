@@ -297,10 +297,35 @@ window.onerror = function (msg, url, line) {
 
     // ========== 设置弹窗 ==========
 
+    // 设置标签页切换
+    document.querySelectorAll('.settings-tab').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.settings-tab').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.settings-tab-content').forEach(c => c.classList.remove('active'));
+            btn.classList.add('active');
+            document.getElementById('stab-' + btn.dataset.stab).classList.add('active');
+        });
+    });
+
+    // 渠道搜索过滤
+    const providerSearch = document.getElementById('provider-search');
+    providerSearch.addEventListener('input', () => {
+        const q = providerSearch.value.toLowerCase();
+        document.querySelectorAll('.provider-key-card').forEach(card => {
+            const name = card.dataset.name || '';
+            card.style.display = name.includes(q) ? '' : 'none';
+        });
+    });
+
     settingsBtn.addEventListener('click', () => openSettings());
 
     function openSettings() {
         applySettingsToUI();
+        // 重置到第一个标签页
+        document.querySelectorAll('.settings-tab').forEach((b, i) => b.classList.toggle('active', i === 0));
+        document.querySelectorAll('.settings-tab-content').forEach((c, i) => c.classList.toggle('active', i === 0));
+        providerSearch.value = '';
+
         const saved = loadSavedKeys();
         settingsBody.innerHTML = '';
 
@@ -312,8 +337,9 @@ window.onerror = function (msg, url, line) {
 
             const card = document.createElement('div');
             card.className = 'provider-key-card';
+            card.dataset.name = (p.name + ' ' + p.display_name).toLowerCase();
             card.innerHTML = `
-                <details ${hasLocalKey || hasEnvKey ? '' : 'open'}>
+                <details ${hasLocalKey || hasEnvKey ? 'open' : ''}>
                     <summary><strong>${esc(p.display_name)}</strong>
                         ${hasEnvKey ? '<span class="badge badge-env">环境变量</span>' : ''}
                         ${hasLocalKey ? '<span class="badge badge-local">本地</span>' : ''}
@@ -322,7 +348,7 @@ window.onerror = function (msg, url, line) {
                         <label for="key-${esc(p.name)}">API Key</label>
                         <input type="password" id="key-${esc(p.name)}" data-provider="${esc(p.name)}" data-field="api_key"
                                value="${esc(local.api_key || '')}" placeholder="${esc(p.env_key_hint || '输入 API Key')}">
-                        <label for="base-${esc(p.name)}">Base URL <small>（可选）</small></label>
+                        <label for="base-${esc(p.name)}">Base URL</label>
                         <input type="text" id="base-${esc(p.name)}" data-provider="${esc(p.name)}" data-field="base_url"
                                value="${esc(local.base_url || '')}" placeholder="${esc(p.base_url_hint || '默认')}">
                     </div>
