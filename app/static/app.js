@@ -414,13 +414,21 @@ window.onerror = function (msg, url, line) {
         if (new Set(customSections).size !== customSections.length) {
             return '自定义章节里有重复项，请去重。';
         }
+        if (new Set(excludeSections).size !== excludeSections.length) {
+            return '排除章节里有重复项，请去重。';
+        }
+        return '';
+    }
 
     function getEffectiveApiKeys() {
         const saved = loadSavedKeys();
         const result = {};
         providersData.forEach(p => {
             const local = saved[p.name] || {};
-            const hasProviderConfig = !!local.api_key || !!local.base_url;
+            const hasApiKey = !!local.api_key;
+            const hasBaseUrl = !!local.base_url;
+            const requiresApiKey = !!p.env_key_hint;
+            const hasProviderConfig = requiresApiKey ? hasApiKey : (hasApiKey || hasBaseUrl);
             if (hasProviderConfig) {
                 result[p.name] = {
                     api_key: local.api_key || '',
@@ -429,6 +437,7 @@ window.onerror = function (msg, url, line) {
                     max_tokens_generate: local.max_tokens_generate || 32768,
                     temperature: local.temperature ?? 0.7,
                 };
+                if (!result[p.name].base_url) delete result[p.name].base_url;
             }
         });
         return result;
@@ -437,13 +446,15 @@ window.onerror = function (msg, url, line) {
     function isProviderReady(p) {
         const saved = loadSavedKeys();
         const local = saved[p.name] || {};
-        return p.is_configured || !!local.api_key || !!local.base_url || !p.env_key_hint;
+        if (p.is_configured || !!local.api_key) {
+            return true;
+        }
+        if (!p.env_key_hint) {
+            return !!local.base_url || true;
+        }
+        return false;
     }
 
-        const saved = loadSavedKeys();
-        const local = saved[p.name] || {};
-        return p.is_configured || !!local.api_key || !!local.base_url || !p.env_key_hint;
-    }
 
     // ========== 设置弹窗 ==========
 
@@ -534,20 +545,15 @@ window.onerror = function (msg, url, line) {
             keys[provider][field] = input.value.trim();
         });
         Object.keys(keys).forEach(p => {
-            const provider = providersData.find(item => item.name === p);
-            const requiresApiKey = !!provider?.env_key_hint;
             const hasApiKey = !!keys[p].api_key;
             const hasBaseUrl = !!keys[p].base_url;
 
-            if (requiresApiKey && !hasApiKey) {
-                delete keys[p];
-                return;
-            }
-            if (!requiresApiKey && !hasApiKey && !hasBaseUrl) {
+            if (!hasApiKey && !hasBaseUrl) {
                 delete keys[p];
                 return;
             }
 
+            if (!keys[p].api_key) delete keys[p].api_key;
             if (!keys[p].base_url) delete keys[p].base_url;
             keys[p].max_tokens_analyze = settings.max_tokens_analyze;
             keys[p].max_tokens_generate = settings.max_tokens_generate;
@@ -830,6 +836,11 @@ window.onerror = function (msg, url, line) {
 
     function showTestStatus(msg, isError) {
         showStatus(msg, isError ? 'error' : 'success', isError ? 0 : 5000);
+    }
+
+
+    function showSuccessStatus(msg) {
+        showStatus(msg, 'success', 2500);
     }
 
 

@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import asyncio
+import json
 import time
 from typing import Callable, Awaitable
 
 from app.analyzer import (
     validate_path, load_gitignore_patterns, traverse_project,
     estimate_total_tokens, compute_project_hash, prioritize_files,
+    split_analysis_groups, should_use_concurrent_analysis, prioritize_group_files,
     ENTRY_NAMES,
 )
 from app.models import FileSnapshot, ProjectAnalysis, GenerateResponse
@@ -70,6 +73,122 @@ Requirements:
 - Make it production-ready, not a template
 """
 
+
+
+GROUP_ANALYSIS_BUDGETS = {
+    "config": 3_000,
+    "backend": 6_000,
+    "frontend": 4_000,
+    "tests": 2_000,
+}
+
+GROUP_ANALYSIS_INSTRUCTIONS = {
+    "config": {
+        "zh": "重点提取项目名称、依赖、安装运行方式、环境配置和 CI/工作流信息。",
+        "en": "Focus on project name, dependencies, installation/run commands, environment config, and CI/workflow details.",
+    },
+    "backend": {
+        "zh": "重点提取后端入口、核心调用链、服务能力、数据模型和架构要点。",
+        "en": "Focus on backend entry points, call flows, service capabilities, data models, and architectural decisions.",
+    },
+    "frontend": {
+        "zh": "重点提取用户界面能力、前端交互流程、设置项和用户可见功能。",
+        "en": "Focus on user-facing UI capabilities, interaction flows, settings, and visible product features.",
+    },
+    "tests": {
+        "zh": "重点提取测试命令、验证方式、开发/调试辅助信息，以及 README 中应保留的重要说明。",
+        "en": "Focus on test commands, verification methods, developer/debugging hints, and important README-worthy notes.",
+    },
+}
+
+
+async def _analyze_snapshot_group(
+    provider: AIProvider,
+    group_name: str,
+    snapshots: list[FileSnapshot],
+    existing_readme: str | None,
+    language: str,
+) -> dict:
+    selected = prioritize_group_files(group_name, snapshots, GROUP_ANALYSIS_BUDGETS.get(group_name, 3_000))
+    group_prompt = build_analysis_prompt(selected, existing_readme)
+    instruction = GROUP_ANALYSIS_INSTRUCTIONS[group_name]["zh" if language == "zh" else "en"]
+    if language == "zh":
+        group_prompt += f"\n\n## 本轮额外要求\n当前分析分组：{group_name}\n{instruction}"
+    else:
+        group_prompt += f"\n\n## Extra instructions\nCurrent analysis group: {group_name}\n{instruction}"
+
+    schema = {
+        "type": "object",
+        "properties": {
+            "project_name": {"type": "string"},
+            "description": {"type": "string"},
+            "languages": {"type": "array", "items": {"type": "string"}},
+            "dependencies": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"},
+                        "category": {"type": "string"},
+                    },
+                    "required": ["name"],
+                },
+            },
+            "entry_points": {"type": "array", "items": {"type": "string"}},
+            "architecture_notes": {"type": "string"},
+            "notable_features": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": ["project_name", "description", "languages", "dependencies", "entry_points", "architecture_notes"],
+    }
+    system_prompt = ANALYSIS_SYSTEM_PROMPT_ZH if language == "zh" else ANALYSIS_SYSTEM_PROMPT_EN
+    return await _retry_on_transient(provider.analyze, system_prompt, group_prompt, schema)
+
+
+async def _analyze_project_concurrently(
+    provider: AIProvider,
+    snapshots: list[FileSnapshot],
+    existing_readme: str | None,
+    on_progress: Callable[[str], Awaitable[None]],
+    language: str,
+) -> ProjectAnalysis:
+    groups = split_analysis_groups(snapshots)
+    await on_progress(f"正在并发分析 {len(groups)} 个项目分组...")
+
+    async def analyze_one(group_name: str, items: list[FileSnapshot]):
+        await on_progress(f"正在分析 {group_name} 分组（{len(items)} 个文件）...")
+        return group_name, await _analyze_snapshot_group(provider, group_name, items, existing_readme, language)
+
+    results = await asyncio.gather(*(analyze_one(name, items) for name, items in groups.items()))
+    merged = []
+    for group_name, payload in results:
+        merged.append({
+            "group": group_name,
+            "project_name": payload.get("project_name", ""),
+            "description": payload.get("description", ""),
+            "languages": payload.get("languages", []),
+            "dependencies": payload.get("dependencies", []),
+            "entry_points": payload.get("entry_points", []),
+            "architecture_notes": payload.get("architecture_notes", ""),
+            "notable_features": payload.get("notable_features", []),
+        })
+
+    if language == "zh":
+        summary_prompt = (
+            "## 分组分析结果\n" + json.dumps(merged, ensure_ascii=False, indent=2) +
+            "\n\n## 任务\n请汇总以上各组分析结果，输出统一的项目结构化结论。"
+        )
+    else:
+        summary_prompt = (
+            "## Group analysis results\n" + json.dumps(merged, ensure_ascii=False, indent=2) +
+            "\n\n## Task\nConsolidate the group analysis results into a single structured project analysis."
+        )
+    schema = _get_project_analysis_schema()
+    system_prompt = ANALYSIS_SYSTEM_PROMPT_ZH if language == "zh" else ANALYSIS_SYSTEM_PROMPT_EN
+    result = await _retry_on_transient(provider.analyze, system_prompt, summary_prompt, schema)
+    analysis = ProjectAnalysis(**result)
+    analysis.existing_readme = existing_readme
+    return analysis
+
 _analysis_cache: dict[str, tuple[ProjectAnalysis, float]] = {}
 CACHE_TTL = 30 * 60  # 30 minutes
 CACHE_MAX_SIZE = 50
@@ -81,7 +200,6 @@ def _evict_expired_cache() -> None:
     expired = [k for k, (_, ts) in _analysis_cache.items() if now - ts >= CACHE_TTL]
     for k in expired:
         del _analysis_cache[k]
-    # If still over max size, remove oldest entries
     if len(_analysis_cache) > CACHE_MAX_SIZE:
         sorted_keys = sorted(_analysis_cache, key=lambda k: _analysis_cache[k][1])
         for k in sorted_keys[:len(_analysis_cache) - CACHE_MAX_SIZE]:
@@ -209,17 +327,20 @@ async def analyze_project(
 
     await on_progress("正在分析项目结构...")
 
-    total_tokens = estimate_total_tokens(snapshots)
-    if total_tokens > 300_000:
-        snapshots = prioritize_files(snapshots, max_tokens=150_000)
+    if should_use_concurrent_analysis(snapshots):
+        analysis = await _analyze_project_concurrently(provider, snapshots, existing_readme, on_progress, language)
+    else:
+        total_tokens = estimate_total_tokens(snapshots)
+        if total_tokens > 12_000:
+            snapshots = prioritize_files(snapshots, max_tokens=10_000)
 
-    user_prompt = build_analysis_prompt(snapshots, existing_readme)
-    schema = _get_project_analysis_schema()
-    system_prompt = ANALYSIS_SYSTEM_PROMPT_ZH if language == "zh" else ANALYSIS_SYSTEM_PROMPT_EN
+        user_prompt = build_analysis_prompt(snapshots, existing_readme)
+        schema = _get_project_analysis_schema()
+        system_prompt = ANALYSIS_SYSTEM_PROMPT_ZH if language == "zh" else ANALYSIS_SYSTEM_PROMPT_EN
 
-    result = await _retry_on_transient(provider.analyze, system_prompt, user_prompt, schema)
-    analysis = ProjectAnalysis(**result)
-    analysis.existing_readme = existing_readme
+        result = await _retry_on_transient(provider.analyze, system_prompt, user_prompt, schema)
+        analysis = ProjectAnalysis(**result)
+        analysis.existing_readme = existing_readme
 
     _analysis_cache[cache_key] = (analysis, time.time())
     return analysis

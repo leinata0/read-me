@@ -22,7 +22,7 @@ SKIP_DIRS: set[str] = {
     "node_modules", "__pycache__", ".git", ".svn", ".hg",
     ".tox", ".mypy_cache", ".pytest_cache", ".venv", "venv",
     "dist", "build", ".next", ".nuxt", "target", "bin", "obj",
-    ".idea", ".vscode", ".cache",
+    ".idea", ".vscode", ".cache", ".ruff_cache",
 }
 
 SOURCE_EXTENSIONS: set[str] = {
@@ -268,33 +268,121 @@ def compute_project_hash(snapshots: list[FileSnapshot]) -> str:
 
 def prioritize_files(snapshots: list[FileSnapshot], max_tokens: int = 150_000) -> list[FileSnapshot]:
     selected: list[FileSnapshot] = []
+    selected_paths: set[str] = set()
     used_tokens = 0
 
-    for snap in snapshots:
-        if snap.is_config:
-            tokens = len(snap.content) // 4
-            if used_tokens + tokens <= max_tokens:
-                selected.append(snap)
-                used_tokens += tokens
+    def try_add(snapshot: FileSnapshot) -> bool:
+        nonlocal used_tokens
+        if snapshot.relative_path in selected_paths:
+            return False
+        tokens = max(1, len(snapshot.content) // 4)
+        if used_tokens + tokens > max_tokens:
+            return False
+        selected.append(snapshot)
+        selected_paths.add(snapshot.relative_path)
+        used_tokens += tokens
+        return True
 
-    for snap in snapshots:
-        if snap in selected:
-            continue
-        stem = Path(snap.relative_path).stem.lower()
-        if stem in ENTRY_NAMES:
-            tokens = len(snap.content) // 4
-            if used_tokens + tokens <= max_tokens:
-                selected.append(snap)
-                used_tokens += tokens
+    def priority(snapshot: FileSnapshot) -> tuple[int, int, str]:
+        rel_path = snapshot.relative_path.replace('\\', '/').lower()
+        name = Path(rel_path).name.lower()
+        stem = Path(rel_path).stem.lower()
 
-    for snap in snapshots:
-        if snap in selected:
+        if snapshot.is_config:
+            return (0, snapshot.size_bytes, rel_path)
+        if stem in ENTRY_NAMES or rel_path in {'app/main.py', 'main.py', 'src/main.py'}:
+            return (1, snapshot.size_bytes, rel_path)
+        if rel_path.endswith('readme.md') or rel_path == 'readme':
+            return (2, snapshot.size_bytes, rel_path)
+        if '/static/' in rel_path or rel_path.endswith(('.css', '.scss', '.sass', '.less')):
+            return (6, snapshot.size_bytes, rel_path)
+        if '/templates/' in rel_path or rel_path.endswith('.html'):
+            return (5, snapshot.size_bytes, rel_path)
+        if rel_path.startswith('tests/') or '/tests/' in rel_path or name.startswith('test_'):
+            return (4, snapshot.size_bytes, rel_path)
+        return (3, snapshot.size_bytes, rel_path)
+
+    for snap in sorted(snapshots, key=priority):
+        try_add(snap)
+
+    return selected
+
+
+def split_analysis_groups(snapshots: list[FileSnapshot]) -> dict[str, list[FileSnapshot]]:
+    groups: dict[str, list[FileSnapshot]] = {
+        "config": [],
+        "backend": [],
+        "frontend": [],
+        "tests": [],
+    }
+    for snapshot in snapshots:
+        rel_path = snapshot.relative_path.replace('\\', '/').lower()
+        stem = Path(rel_path).stem.lower()
+        name = Path(rel_path).name.lower()
+
+        if snapshot.is_config or rel_path.startswith('.github/') or rel_path in {'.gitignore', 'readme.md', 'readme'}:
+            groups["config"].append(snapshot)
             continue
-        tokens = len(snap.content) // 4
-        if used_tokens + tokens <= max_tokens:
-            selected.append(snap)
-            used_tokens += tokens
-        else:
-            break
+        if rel_path.startswith('tests/') or '/tests/' in rel_path or name.startswith('test_'):
+            groups["tests"].append(snapshot)
+            continue
+        if rel_path.endswith(('.js', '.ts', '.tsx', '.html')) or '/templates/' in rel_path:
+            groups["frontend"].append(snapshot)
+            continue
+        if stem in ENTRY_NAMES or rel_path.startswith(('app/', 'src/')):
+            groups["backend"].append(snapshot)
+            continue
+        groups["backend"].append(snapshot)
+    return {group_name: items for group_name, items in groups.items() if items}
+
+
+
+def should_use_concurrent_analysis(snapshots: list[FileSnapshot], token_threshold: int = 12_000, file_threshold: int = 12) -> bool:
+    return len(snapshots) >= file_threshold or estimate_total_tokens(snapshots) > token_threshold
+
+
+
+def prioritize_group_files(group_name: str, snapshots: list[FileSnapshot], max_tokens: int) -> list[FileSnapshot]:
+    if estimate_total_tokens(snapshots) <= max_tokens:
+        return snapshots
+
+    selected: list[FileSnapshot] = []
+    used_tokens = 0
+
+    def try_add(snapshot: FileSnapshot) -> bool:
+        nonlocal used_tokens
+        tokens = max(1, len(snapshot.content) // 4)
+        if used_tokens + tokens > max_tokens:
+            return False
+        selected.append(snapshot)
+        used_tokens += tokens
+        return True
+
+    def priority(snapshot: FileSnapshot) -> tuple[int, int, str]:
+        rel_path = snapshot.relative_path.replace('\\', '/').lower()
+        stem = Path(rel_path).stem.lower()
+        name = Path(rel_path).name.lower()
+        if group_name == 'config':
+            return (0 if snapshot.is_config else 1, snapshot.size_bytes, rel_path)
+        if group_name == 'backend':
+            if rel_path in {'app/main.py', 'app/generator.py', 'app/analyzer.py', 'app/providers.py', 'app/models.py'}:
+                return (0, snapshot.size_bytes, rel_path)
+            if stem in ENTRY_NAMES:
+                return (1, snapshot.size_bytes, rel_path)
+            return (2, snapshot.size_bytes, rel_path)
+        if group_name == 'frontend':
+            if rel_path.endswith('app.js'):
+                return (0, snapshot.size_bytes, rel_path)
+            if rel_path.endswith(('.js', '.ts', '.tsx')):
+                return (1, snapshot.size_bytes, rel_path)
+            if rel_path.endswith('.html'):
+                return (2, snapshot.size_bytes, rel_path)
+            return (3, snapshot.size_bytes, rel_path)
+        if name.startswith('test_'):
+            return (0, snapshot.size_bytes, rel_path)
+        return (1, snapshot.size_bytes, rel_path)
+
+    for snapshot in sorted(snapshots, key=priority):
+        try_add(snapshot)
 
     return selected

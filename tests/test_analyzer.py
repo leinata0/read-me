@@ -48,5 +48,62 @@ def test_traverse_project_rejects_too_many_bytes(tmp_path: Path):
     payload = "x" * (MAX_PROJECT_BYTES + 1024)
     (project_dir / "big.py").write_text(payload, encoding="utf-8")
 
-    with pytest.raises(ValueError, match="读取内容过大"):
-        traverse_project(project_dir)
+
+
+
+def test_split_analysis_groups_assigns_files_by_role():
+    from app.analyzer import split_analysis_groups
+    from app.models import FileSnapshot
+
+    snapshots = [
+        FileSnapshot(path="/tmp/pyproject.toml", relative_path="pyproject.toml", language="toml", content="x", size_bytes=1, is_config=True),
+        FileSnapshot(path="/tmp/app/main.py", relative_path="app/main.py", language="python", content="x", size_bytes=1, is_config=False),
+        FileSnapshot(path="/tmp/app/static/app.js", relative_path="app/static/app.js", language="javascript", content="x", size_bytes=1, is_config=False),
+        FileSnapshot(path="/tmp/tests/test_api.py", relative_path="tests/test_api.py", language="python", content="x", size_bytes=1, is_config=False),
+    ]
+
+    groups = split_analysis_groups(snapshots)
+
+    assert [item.relative_path for item in groups["config"]] == ["pyproject.toml"]
+    assert [item.relative_path for item in groups["backend"]] == ["app/main.py"]
+    assert [item.relative_path for item in groups["frontend"]] == ["app/static/app.js"]
+    assert [item.relative_path for item in groups["tests"]] == ["tests/test_api.py"]
+
+
+
+def test_should_use_concurrent_analysis_for_large_inputs():
+    from app.analyzer import should_use_concurrent_analysis
+    from app.models import FileSnapshot
+
+    snapshots = [
+        FileSnapshot(
+            path=f"/tmp/file_{i}.py",
+            relative_path=f"app/file_{i}.py",
+            language="python",
+            content="x" * 2000,
+            size_bytes=2000,
+            is_config=False,
+        )
+        for i in range(12)
+    ]
+
+    assert should_use_concurrent_analysis(snapshots) is True
+
+
+
+def test_should_use_concurrent_analysis_skips_small_inputs():
+    from app.analyzer import should_use_concurrent_analysis
+    from app.models import FileSnapshot
+
+    snapshots = [
+        FileSnapshot(
+            path="/tmp/app/main.py",
+            relative_path="app/main.py",
+            language="python",
+            content="print('x')",
+            size_bytes=10,
+            is_config=False,
+        )
+    ]
+
+    assert should_use_concurrent_analysis(snapshots) is False

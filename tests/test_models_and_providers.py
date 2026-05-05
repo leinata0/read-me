@@ -11,7 +11,6 @@ from app.models import (
 )
 from app.providers import (
     ProviderError,
-    _map_generic_error,
     _normalize_base_url,
     _ollama_connection_message,
 )
@@ -118,7 +117,65 @@ def test_ollama_connection_message_for_localhost():
     assert "localhost:11434" in msg
 
 
+def test_build_readme_prompt_uses_entry_snippets_from_analysis_entry_points():
+    analysis = ProjectAnalysis(
+        project_name="demo",
+        description="demo project",
+        languages=["python"],
+        dependencies=[Dependency(name="fastapi")],
+        entry_points=["src/custom_entry.py"],
+        architecture_notes="notes",
+    )
+    snapshots = [
+        FileSnapshot(
+            path="/tmp/src/custom_entry.py",
+            relative_path="src/custom_entry.py",
+            language="python",
+            content="print('hello')\n" * 5,
+            size_bytes=70,
+            is_config=False,
+        )
+    ]
+
+    prompt = build_readme_prompt(analysis, snapshots)
+
+    assert "## Key Source Files (for usage examples)" in prompt
+    assert "src/custom_entry.py" in prompt
+
+
 def test_map_generic_error_uses_ollama_specific_message():
+    from app.providers import _map_generic_error
+
     err = _map_generic_error(RuntimeError("connection refused"), "Ollama", "http://localhost:11434/v1")
     assert err.code == 503
     assert "Please start Ollama" in err.message
+
+
+def test_prioritize_group_files_keeps_backend_core_files():
+    from app.analyzer import prioritize_group_files
+
+    snapshots = [
+        FileSnapshot(path="/tmp/app/main.py", relative_path="app/main.py", language="python", content="x" * 4000, size_bytes=4000, is_config=False),
+        FileSnapshot(path="/tmp/app/generator.py", relative_path="app/generator.py", language="python", content="x" * 4000, size_bytes=4000, is_config=False),
+        FileSnapshot(path="/tmp/app/providers.py", relative_path="app/providers.py", language="python", content="x" * 4000, size_bytes=4000, is_config=False),
+    ]
+
+    selected = prioritize_group_files("backend", snapshots, max_tokens=2000)
+
+    selected_paths = [item.relative_path for item in selected]
+    assert "app/main.py" in selected_paths
+    assert "app/generator.py" in selected_paths
+
+
+def test_prioritize_group_files_keeps_frontend_app_js_first():
+    from app.analyzer import prioritize_group_files
+
+    snapshots = [
+        FileSnapshot(path="/tmp/app/static/style.css", relative_path="app/static/style.css", language="text", content="x" * 4000, size_bytes=4000, is_config=False),
+        FileSnapshot(path="/tmp/app/static/app.js", relative_path="app/static/app.js", language="javascript", content="x" * 4000, size_bytes=4000, is_config=False),
+        FileSnapshot(path="/tmp/app/templates/index.html", relative_path="app/templates/index.html", language="html", content="x" * 4000, size_bytes=4000, is_config=False),
+    ]
+
+    selected = prioritize_group_files("frontend", snapshots, max_tokens=2000)
+
+    assert selected[0].relative_path == "app/static/app.js"
