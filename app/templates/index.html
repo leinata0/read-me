@@ -13,38 +13,51 @@
     <noscript><p>此应用需要 JavaScript 才能运行，请启用 JavaScript 后刷新页面。</p></noscript>
     <main class="container">
         <hgroup>
-            <h1>README 生成器 <button type="button" id="theme-toggle" class="theme-toggle" title="切换深色模式">&#9790;</button></h1>
+            <h1>README 生成器 <button type="button" id="theme-toggle" class="theme-toggle" title="切换深色模式" aria-label="切换深色模式">&#9790;</button></h1>
             <p>AI 驱动的 README.md 自动生成工具，适用于任何项目</p>
         </hgroup>
 
+        <article class="start-guide">
+            <strong>首次使用建议：</strong>
+            <ol>
+                <li>先选择渠道并按需打开齿轮配置 API Key 或 Base URL。</li>
+                <li>输入项目路径后可先点「测试连接」确认模型可用。</li>
+                <li>生成完成后，可在下方输入反馈继续迭代当前 README。</li>
+            </ol>
+        </article>
+
         <!-- 输入区 -->
-        <section id="input-section">
+        <section id="input-section" aria-labelledby="input-section-title">
+            <h2 id="input-section-title" class="sr-only">README 生成输入区</h2>
             <form id="analyze-form">
                 <label for="folder-path">项目文件夹路径</label>
                 <input type="text" id="folder-path" name="folder_path"
-                       placeholder="C:\Users\...\my-project 或 /home/user/my-project" required>
+                       placeholder="C:\Users\...\my-project 或 /home/user/my-project" required aria-describedby="folder-path-help">
+                <small id="folder-path-help">请输入实际项目目录，避免选择个人敏感目录或纯空目录。</small>
 
                 <div class="grid">
                     <div>
                         <label for="provider-select">AI 渠道
-                            <button type="button" id="settings-btn" class="settings-icon" title="配置 API Key">&#9881;</button>
+                            <button type="button" id="settings-btn" class="settings-icon" title="配置 API Key" aria-label="打开渠道设置">&#9881;</button>
                         </label>
-                        <select id="provider-select" name="provider">
+                        <select id="provider-select" name="provider" aria-describedby="provider-help">
                             <option value="">加载中...</option>
                         </select>
+                        <small id="provider-help">如果渠道显示“点击齿轮配置”，请先在设置中补充凭据或 Base URL。</small>
                     </div>
                     <div>
                         <label for="model-input">模型
-                            <button type="button" id="refresh-models-btn" class="settings-icon" title="从 API 获取可用模型列表" style="display:none">&#8635;</button>
+                            <button type="button" id="refresh-models-btn" class="settings-icon" title="从 API 获取可用模型列表" style="display:none" aria-label="刷新模型列表">&#8635;</button>
                         </label>
                         <input type="text" id="model-input" name="model" list="model-datalist"
-                               placeholder="输入或选择模型" autocomplete="off">
+                               placeholder="输入或选择模型" autocomplete="off" aria-describedby="model-hint model-help">
                         <datalist id="model-datalist"></datalist>
                         <small id="model-hint" style="display:none;color:#e74c3c"></small>
+                        <small id="model-help">默认会带出推荐模型；如果模型列表获取失败，也可以手动输入模型名。</small>
                     </div>
                 </div>
 
-                <div id="key-status" class="key-status" style="display:none">
+                <div id="key-status" class="key-status" style="display:none" aria-live="polite">
                     <small id="key-status-text"></small>
                 </div>
 
@@ -53,45 +66,43 @@
                     <button type="button" id="test-btn" class="secondary outline">测试连接</button>
                     <button type="button" id="cancel-btn" class="secondary outline" style="display:none">取消生成</button>
                 </div>
-                <div id="test-status" class="test-status" style="display:none">
-                    <small id="test-status-text"></small>
-                </div>
             </form>
         </section>
 
         <!-- 进度区 -->
-        <section id="progress-section" style="display:none">
-            <div class="pipeline-steps" id="pipeline-steps">
-                <div class="pipeline-step" data-step="validate">
-                    <div class="step-icon"><span></span></div>
+        <section id="progress-section" style="display:none" aria-labelledby="progress-title" aria-live="polite">
+            <h2 id="progress-title" class="sr-only">生成进度</h2>
+            <div class="pipeline-steps" id="pipeline-steps" role="list" aria-label="README 生成步骤">
+                <div class="pipeline-step" data-step="validate" role="listitem">
+                    <div class="step-icon" aria-hidden="true"><span></span></div>
                     <div class="step-info">
                         <span class="step-label">校验路径</span>
                         <span class="step-detail"></span>
                     </div>
                 </div>
-                <div class="pipeline-step" data-step="read">
-                    <div class="step-icon"><span></span></div>
+                <div class="pipeline-step" data-step="read" role="listitem">
+                    <div class="step-icon" aria-hidden="true"><span></span></div>
                     <div class="step-info">
                         <span class="step-label">读取文件</span>
                         <span class="step-detail"></span>
                     </div>
                 </div>
-                <div class="pipeline-step" data-step="analyze">
-                    <div class="step-icon"><span></span></div>
+                <div class="pipeline-step" data-step="analyze" role="listitem">
+                    <div class="step-icon" aria-hidden="true"><span></span></div>
                     <div class="step-info">
                         <span class="step-label">AI 分析</span>
                         <span class="step-detail"></span>
                     </div>
                 </div>
-                <div class="pipeline-step" data-step="generate">
-                    <div class="step-icon"><span></span></div>
+                <div class="pipeline-step" data-step="generate" role="listitem">
+                    <div class="step-icon" aria-hidden="true"><span></span></div>
                     <div class="step-info">
                         <span class="step-label">生成 README</span>
                         <span class="step-detail"></span>
                     </div>
                 </div>
             </div>
-            <div id="stream-stats" class="stream-stats" style="display:none">
+            <div id="stream-stats" class="stream-stats" style="display:none" aria-label="流式生成统计">
                 <span id="stat-chars">0 字符</span>
                 <span class="stat-sep">|</span>
                 <span id="stat-time">0s</span>
@@ -100,27 +111,26 @@
             </div>
         </section>
 
-        <article id="error-section" style="display:none" class="error-card">
-            <header>错误</header>
-            <p id="error-message"></p>
-            <footer><button id="error-dismiss-btn" class="secondary outline">关闭</button></footer>
+        <article id="status-section" style="display:none" class="status-card" role="status" aria-live="polite">
+            <p id="status-message"></p>
         </article>
 
         <!-- 预览区 -->
-        <section id="preview-section" style="display:none">
+        <section id="preview-section" style="display:none" aria-labelledby="preview-section-title">
+            <h2 id="preview-section-title" class="sr-only">README 预览与编辑区</h2>
             <article>
                 <header>
-                    <div class="tabs">
-                        <button class="tab-btn active" data-tab="preview">预览</button>
-                        <button class="tab-btn" data-tab="source">Markdown 源码</button>
+                    <div class="tabs" role="tablist" aria-label="README 视图切换">
+                        <button class="tab-btn active" data-tab="preview" role="tab" aria-selected="true" aria-controls="tab-preview" id="tab-btn-preview">预览</button>
+                        <button class="tab-btn" data-tab="source" role="tab" aria-selected="false" aria-controls="tab-source" id="tab-btn-source">Markdown 源码</button>
                     </div>
                 </header>
 
-                <div id="tab-preview" class="tab-content active">
+                <div id="tab-preview" class="tab-content active" role="tabpanel" aria-labelledby="tab-btn-preview">
                     <div id="readme-preview" class="readme-body"></div>
                 </div>
 
-                <div id="tab-source" class="tab-content">
+                <div id="tab-source" class="tab-content" role="tabpanel" aria-labelledby="tab-btn-source">
                     <div class="source-toolbar">
                         <button type="button" id="copy-btn" class="secondary outline small-btn">复制源码</button>
                     </div>
@@ -137,7 +147,7 @@
                             <button type="button" class="chip" data-feedback="添加中文翻译">加中文</button>
                             <button type="button" class="chip" data-feedback="去掉 Badge">去 Badge</button>
                         </div>
-                        <textarea id="feedback-input" rows="2" placeholder="输入修改反馈，如：描述太长、加个 API 章节... (Enter 提交, Ctrl+Enter 换行)"></textarea>
+                        <textarea id="feedback-input" rows="2" placeholder="输入修改反馈，如：描述太长、加个 API 章节... (Enter 提交, Ctrl+Enter 换行)" aria-label="README 修改反馈"></textarea>
                         <div class="feedback-actions">
                             <button id="feedback-btn" class="contrast">根据反馈重新生成</button>
                             <button id="download-btn">下载 README.md</button>
@@ -149,7 +159,8 @@
         </section>
 
         <!-- 历史记录 -->
-        <section id="history-section" style="display:none">
+        <section id="history-section" style="display:none" aria-labelledby="history-title">
+            <h2 id="history-title" class="sr-only">历史记录</h2>
             <details class="settings-group">
                 <summary class="settings-group-title">历史记录 <span id="history-count"></span></summary>
                 <div id="history-list"></div>
@@ -158,17 +169,18 @@
     </main>
 
     <!-- 设置弹窗 -->
-    <dialog id="settings-dialog">
+    <dialog id="settings-dialog" aria-labelledby="settings-title">
         <article>
             <header>
-                <div class="settings-tabs">
-                    <button class="settings-tab active" data-stab="basic">基本设置</button>
-                    <button class="settings-tab" data-stab="advanced">高级设置</button>
-                    <button class="settings-tab" data-stab="apikey">API Key</button>
+                <h2 id="settings-title" class="sr-only">README 生成设置</h2>
+                <div class="settings-tabs" role="tablist" aria-label="设置分类">
+                    <button class="settings-tab active" data-stab="basic" role="tab" aria-selected="true" aria-controls="stab-basic">基本设置</button>
+                    <button class="settings-tab" data-stab="advanced" role="tab" aria-selected="false" aria-controls="stab-advanced">高级设置</button>
+                    <button class="settings-tab" data-stab="apikey" role="tab" aria-selected="false" aria-controls="stab-apikey">API Key</button>
                 </div>
             </header>
 
-            <div id="stab-basic" class="settings-tab-content active">
+            <div id="stab-basic" class="settings-tab-content active" role="tabpanel">
                 <div class="settings-row">
                     <div>
                         <label for="setting-language">README 语言</label>
@@ -232,7 +244,7 @@
                 </div>
             </div>
 
-            <div id="stab-advanced" class="settings-tab-content">
+            <div id="stab-advanced" class="settings-tab-content" role="tabpanel">
                 <div class="settings-row">
                     <div>
                         <label for="setting-max-analyze">分析 max_tokens</label>
@@ -282,13 +294,14 @@
                 </div>
             </div>
 
-            <div id="stab-apikey" class="settings-tab-content">
+            <div id="stab-apikey" class="settings-tab-content" role="tabpanel">
                 <small style="display:block;margin-bottom:0.5rem;color:var(--pico-muted-color)">API Key 仅保存在当前浏览器会话中，关闭标签页后会自动清除。</small>
                 <input type="text" id="provider-search" placeholder="搜索渠道..." style="margin-bottom:0.5rem;font-size:0.85rem">
                 <div id="settings-body"></div>
             </div>
 
             <footer>
+                <small id="settings-error" style="display:none;color:#e74c3c;margin-top:0.5rem" aria-live="polite"></small>
                 <div class="grid">
                     <button id="settings-save-btn" class="contrast">保存</button>
                     <button id="settings-close-btn" class="secondary outline">取消</button>

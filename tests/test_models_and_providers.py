@@ -1,8 +1,20 @@
 import pytest
 
-from app.generator import build_readme_prompt
-from app.models import AnalyzeRequest, Dependency, FileSnapshot, ListModelsRequest, ProjectAnalysis, ProviderKeys
-from app.providers import ProviderError, _map_generic_error, _normalize_base_url, _ollama_connection_message
+from app.generator import _build_analysis_cache_key, build_readme_prompt
+from app.models import (
+    AnalyzeRequest,
+    Dependency,
+    FileSnapshot,
+    ListModelsRequest,
+    ProjectAnalysis,
+    ProviderKeys,
+)
+from app.providers import (
+    ProviderError,
+    _map_generic_error,
+    _normalize_base_url,
+    _ollama_connection_message,
+)
 
 
 def test_normalize_base_url_rejects_metadata_host():
@@ -32,6 +44,11 @@ def test_analyze_request_trims_and_clamps_fields():
     assert req.temperature == 0.0
     assert req.toc_depth == 4
     assert req.model == "qwen"
+
+
+def test_analyze_request_rejects_invalid_enum_values():
+    with pytest.raises(Exception):
+        AnalyzeRequest(folder_path='.', language='fr', tone='formal')
 
 
 def test_build_readme_prompt_includes_previous_readme_and_feedback():
@@ -66,6 +83,28 @@ def test_build_readme_prompt_includes_previous_readme_and_feedback():
     assert "## 用户反馈" in prompt
     assert "把简介缩短，并补一个 FAQ" in prompt
     assert "只修改反馈中提到的问题" in prompt
+
+
+def test_build_analysis_cache_key_includes_context_dimensions():
+    snapshots = [
+        FileSnapshot(
+            path="/tmp/app/main.py",
+            relative_path="app/main.py",
+            language="python",
+            content="print('hello')",
+            size_bytes=14,
+            is_config=False,
+        )
+    ]
+
+    key_a = _build_analysis_cache_key(snapshots, "zh", "*.py", "", False)
+    key_b = _build_analysis_cache_key(snapshots, "en", "*.py", "", False)
+    key_c = _build_analysis_cache_key(snapshots, "zh", "*.py", "tests/*", False)
+    key_d = _build_analysis_cache_key(snapshots, "zh", "*.py", "", True)
+
+    assert key_a != key_b
+    assert key_a != key_c
+    assert key_a != key_d
 
 
 def test_list_models_request_trims_base_url():

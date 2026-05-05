@@ -3,13 +3,12 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 from pathlib import Path
 from typing import AsyncGenerator
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, StreamingResponse, Response, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -21,6 +20,8 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 
 BASE_DIR = Path(__file__).resolve().parent
+SSE_QUEUE_MAXSIZE = 256
+SSE_HEARTBEAT_SECONDS = 10
 
 app = FastAPI(title="README Generator", version="1.2.0")
 
@@ -69,7 +70,7 @@ async def api_test_connection(req: TestConnectionRequest):
     try:
         provider = get_provider(req.provider, req.model, req.api_keys)
         start = _time.time()
-        result = await provider.analyze(
+        await provider.analyze(
             system_prompt="You are a test assistant. Respond with a short confirmation.",
             user_prompt='Respond with exactly: {"status":"ok"}',
             json_schema={"type": "object", "properties": {"status": {"type": "string"}}},
@@ -98,7 +99,7 @@ async def api_test_connection(req: TestConnectionRequest):
 
 @app.post("/api/analyze")
 async def api_analyze(req: AnalyzeRequest, request: Request):
-    queue: asyncio.Queue[str | None] = asyncio.Queue()
+    queue: asyncio.Queue[str | None] = asyncio.Queue(maxsize=SSE_QUEUE_MAXSIZE)
     stream_closed = False
 
     _step_map = {
@@ -193,8 +194,9 @@ async def api_analyze(req: AnalyzeRequest, request: Request):
                     task.cancel()
                     break
                 try:
-                    item = await asyncio.wait_for(queue.get(), timeout=0.25)
+                    item = await asyncio.wait_for(queue.get(), timeout=SSE_HEARTBEAT_SECONDS)
                 except asyncio.TimeoutError:
+                    yield ": keep-alive\n\n"
                     continue
                 if item is None:
                     break

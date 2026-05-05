@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import time
 from typing import Callable, Awaitable
 
@@ -89,6 +88,23 @@ def _evict_expired_cache() -> None:
             del _analysis_cache[k]
 
 
+def _build_analysis_cache_key(
+    snapshots: list[FileSnapshot],
+    language: str,
+    include_patterns: str = "",
+    exclude_patterns: str = "",
+    feedback_mode: bool = False,
+) -> str:
+    base_hash = compute_project_hash(snapshots)
+    return "|".join([
+        base_hash,
+        language,
+        include_patterns.strip(),
+        exclude_patterns.strip(),
+        "feedback" if feedback_mode else "normal",
+    ])
+
+
 def _get_project_analysis_schema() -> dict:
     return ProjectAnalysis.model_json_schema()
 
@@ -174,10 +190,19 @@ async def analyze_project(
     existing_readme: str | None,
     on_progress: Callable[[str], Awaitable[None]],
     language: str = "zh",
+    include_patterns: str = "",
+    exclude_patterns: str = "",
+    feedback_mode: bool = False,
 ) -> ProjectAnalysis:
     _evict_expired_cache()
-    project_hash = compute_project_hash(snapshots)
-    cached = _analysis_cache.get(project_hash)
+    cache_key = _build_analysis_cache_key(
+        snapshots,
+        language,
+        include_patterns,
+        exclude_patterns,
+        feedback_mode,
+    )
+    cached = _analysis_cache.get(cache_key)
     if cached and (time.time() - cached[1]) < CACHE_TTL:
         await on_progress("使用缓存的分析结果...")
         return cached[0]
@@ -196,7 +221,7 @@ async def analyze_project(
     analysis = ProjectAnalysis(**result)
     analysis.existing_readme = existing_readme
 
-    _analysis_cache[project_hash] = (analysis, time.time())
+    _analysis_cache[cache_key] = (analysis, time.time())
     return analysis
 
 
@@ -346,12 +371,28 @@ async def run_pipeline(
     if not snapshots:
         raise ValueError("项目中未找到源代码文件，请确保文件夹中包含代码文件。")
 
-    if feedback and previous_readme:
-        await on_progress("根据反馈修订中...")
-        analysis = await analyze_project(provider, snapshots, existing_readme, on_progress, language)
+        analysis = await analyze_project(
+            provider,
+            snapshots,
+            existing_readme,
+            on_progress,
+            language,
+            include_patterns,
+            exclude_patterns,
+            feedback_mode=True,
+        )
     else:
         await on_progress(f"找到 {len(snapshots)} 个源文件，正在分析...")
-        analysis = await analyze_project(provider, snapshots, existing_readme, on_progress, language)
+        analysis = await analyze_project(
+            provider,
+            snapshots,
+            existing_readme,
+            on_progress,
+            language,
+            include_patterns,
+            exclude_patterns,
+            feedback_mode=False,
+        )
 
     readme = await generate_readme(
         provider, analysis, snapshots, on_progress, on_chunk,

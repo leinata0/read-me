@@ -95,7 +95,11 @@ def test_api_analyze_emits_progress_chunk_and_done(monkeypatch):
 
 def test_api_test_connection_returns_provider_error(monkeypatch):
     def fake_get_provider(*args, **kwargs):
-        raise ProviderError(503, "Cannot reach Ollama at http://localhost:11434/v1. Please start Ollama and confirm the model server is listening.")
+        raise ProviderError(
+            503,
+            "Cannot reach Ollama at http://localhost:11434/v1. "
+            "Please start Ollama and confirm the model server is listening.",
+        )
 
     monkeypatch.setattr("app.main.get_provider", fake_get_provider)
 

@@ -22,5 +22,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run tests
-        run: pytest -q
+      - name: Run Ruff
+        run: ruff check .
+
+      - name: Run tests with coverage
+        run: pytest
+
+      - name: Run dependency audit
+        run: pip-audit -r requirements.txt

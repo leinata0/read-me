@@ -1,4 +1,24 @@
-/* Custom styles for README Generator */
+
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+.start-guide {
+    margin-bottom: 1rem;
+}
+
+.start-guide ol {
+    margin: 0.5rem 0 0;
+    padding-left: 1.25rem;
+}
 
 .tabs {
     display: flex;
@@ -100,17 +120,26 @@
     tab-size: 4;
 }
 
-.error-card {
+.status-card {
+    padding: 0.75rem 1rem;
+    border: 1px solid var(--pico-muted-border-color);
+    border-radius: var(--pico-border-radius);
+    margin-bottom: 1rem;
+}
+
+.status-card[data-variant="error"] {
     border-color: #e74c3c;
+    background: #fff3f3;
 }
 
-.error-card header {
-    color: #e74c3c;
-    font-weight: 700;
+.status-card[data-variant="success"] {
+    border-color: #27ae60;
+    background: #f3fff7;
 }
 
-#progress-section {
-    text-align: center;
+.status-card[data-variant="info"] {
+    border-color: var(--pico-muted-border-color);
+    background: var(--pico-form-element-background-color);
 }
 
 /* --- Pipeline Steps --- */

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -32,9 +34,9 @@ class AnalyzeRequest(BaseModel):
     provider: str | None = None
     model: str | None = None
     api_keys: dict[str, ProviderKeys] = Field(default_factory=dict)
-    language: str = "zh"
+    language: Literal["zh", "en"] = "zh"
     temperature: float = 0.7
-    tone: str = "professional"
+    tone: Literal["professional", "casual", "technical"] = "professional"
     custom_sections: str = ""
     exclude_sections: str = ""
     include_badges: bool = True
@@ -43,12 +45,12 @@ class AnalyzeRequest(BaseModel):
     exclude_patterns: str = ""
     feedback: str = ""
     previous_readme: str = ""
-    badge_style: str = "shields"
+    badge_style: Literal["shields", "shields-flat", "badgen"] = "shields"
     toc_depth: int = 2
-    code_examples: str = "normal"
-    link_style: str = "inline"
+    code_examples: Literal["minimal", "normal", "detailed"] = "normal"
+    link_style: Literal["inline", "reference"] = "inline"
     section_order: str = ""
-    audience: str = "developer"
+    audience: Literal["developer", "user", "contributor"] = "developer"
 
     @field_validator("folder_path")
     @classmethod
@@ -59,9 +61,8 @@ class AnalyzeRequest(BaseModel):
         return value[:500]
 
     @field_validator(
-        "provider", "model", "tone", "custom_sections", "exclude_sections", "custom_prompt_suffix",
-        "include_patterns", "exclude_patterns", "feedback", "previous_readme", "badge_style",
-        "code_examples", "link_style", "section_order", "audience",
+        "provider", "model", "custom_sections", "exclude_sections", "custom_prompt_suffix",
+        "include_patterns", "exclude_patterns", "feedback", "previous_readme", "section_order",
     )
     @classmethod
     def trim_strings(cls, value: str | None) -> str | None:
@@ -133,9 +134,9 @@ class TestConnectionRequest(BaseModel):
     provider: str | None = None
     model: str | None = None
     api_keys: dict[str, ProviderKeys] = Field(default_factory=dict)
-    language: str = "zh"
+    language: Literal["zh", "en"] = "zh"
 
-    @field_validator("provider", "model", "language")
+    @field_validator("provider", "model")
     @classmethod
     def trim_strings(cls, value: str | None) -> str | None:
         if value is None:

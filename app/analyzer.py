@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import platform
 from pathlib import Path
 
 import pathspec
@@ -53,8 +54,6 @@ EXT_TO_LANG: dict[str, str] = {
     ".txt": "text", ".cfg": "ini", ".ini": "ini", ".conf": "ini",
 }
 
-import platform
-
 _system = platform.system()
 if _system == "Windows":
     BLOCKED_PREFIXES: list[str] = [
@@ -68,6 +67,8 @@ else:
 
 MAX_FILE_BYTES = 32 * 1024  # 32KB
 MAX_PATH_LENGTH = 500
+MAX_PROJECT_FILES = 2000
+MAX_PROJECT_BYTES = 8 * 1024 * 1024  # 8MB of source/config text before truncation
 
 ENTRY_NAMES: set[str] = {"main", "app", "index", "server", "cli", "run"}
 PROJECT_DIR_MARKERS: set[str] = {
@@ -136,7 +137,6 @@ def validate_path(folder_path: str) -> Path:
     if not resolved.is_dir():
         raise ValueError(f"The specified path is not a directory: {folder_path}")
 
-    # Normalize: ensure prefix ends with separator to avoid false positives
     resolved_str = str(resolved)
     if len(resolved_str) > MAX_PATH_LENGTH:
         raise ValueError("Path too long.")
@@ -194,6 +194,7 @@ def traverse_project(folder_path: Path, pathspec_obj: pathspec.PathSpec | None =
     exclude_list = [p.strip() for p in exclude_patterns.split(",") if p.strip()] if exclude_patterns else []
     snapshots: list[FileSnapshot] = []
     existing_readme: str | None = None
+    total_bytes = 0
 
     for root, dirs, files in os.walk(folder_path, followlinks=False):
         rel_root = Path(root).relative_to(folder_path)
@@ -212,7 +213,6 @@ def traverse_project(folder_path: Path, pathspec_obj: pathspec.PathSpec | None =
             if pathspec_obj and pathspec_obj.match_file(rel_file):
                 continue
 
-            # Include/exclude pattern filtering
             if include_list and not any(fnmatch.fnmatch(filename, pat) or fnmatch.fnmatch(rel_file, pat) for pat in include_list):
                 continue
             if exclude_list and any(fnmatch.fnmatch(filename, pat) or fnmatch.fnmatch(rel_file, pat) for pat in exclude_list):
@@ -234,14 +234,21 @@ def traverse_project(folder_path: Path, pathspec_obj: pathspec.PathSpec | None =
             if not content:
                 continue
 
+            file_size = full_path.stat().st_size
+            total_bytes += file_size
             snapshots.append(FileSnapshot(
                 path=str(full_path),
                 relative_path=rel_file,
                 language=_detect_language(ext),
                 content=content,
-                size_bytes=full_path.stat().st_size,
+                size_bytes=file_size,
                 is_config=filename in CONFIG_FILES,
             ))
+
+            if len(snapshots) > MAX_PROJECT_FILES:
+                raise ValueError(f"项目包含的可读文件过多（>{MAX_PROJECT_FILES}），请使用包含/排除文件模式缩小范围。")
+            if total_bytes > MAX_PROJECT_BYTES:
+                raise ValueError(f"项目读取内容过大（>{MAX_PROJECT_BYTES // (1024 * 1024)}MB），请使用包含/排除文件模式缩小范围。")
 
     snapshots.sort(key=lambda s: (0 if s.is_config else 1, s.relative_path))
     return snapshots, existing_readme

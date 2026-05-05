@@ -16,21 +16,20 @@ class DisconnectingRequest:
         return self.calls > 1
 
 
-@pytest.mark.asyncio
-async def test_api_analyze_cancels_background_task_on_disconnect(monkeypatch):
-    cancelled = asyncio.Event()
+class ConnectedRequest:
+    async def is_disconnected(self):
+        return False
 
+
+@pytest.mark.asyncio
+async def test_api_analyze_stops_stream_on_disconnect(monkeypatch):
     class StubProvider:
         model = "qwen2.5:7b"
         name = "ollama"
 
     async def fake_run_pipeline(**kwargs):
-        try:
-            await asyncio.sleep(5)
-            return GenerateResponse(readme="# never", model="qwen2.5:7b", provider="ollama")
-        except asyncio.CancelledError:
-            cancelled.set()
-            raise
+        await asyncio.sleep(5)
+        return GenerateResponse(readme="# never", model="qwen2.5:7b", provider="ollama")
 
     monkeypatch.setattr("app.main.get_provider", lambda *args, **kwargs: StubProvider())
     monkeypatch.setattr("app.main.run_pipeline", fake_run_pipeline)
@@ -43,4 +42,28 @@ async def test_api_analyze_cancels_background_task_on_disconnect(monkeypatch):
         chunks.append(chunk)
 
     assert chunks == []
-    assert cancelled.is_set()
+
+
+@pytest.mark.asyncio
+async def test_api_analyze_emits_keep_alive_when_idle(monkeypatch):
+    class StubProvider:
+        model = "qwen2.5:7b"
+        name = "ollama"
+
+    async def fake_run_pipeline(**kwargs):
+        await asyncio.sleep(0.05)
+        return GenerateResponse(readme="# done", model="qwen2.5:7b", provider="ollama")
+
+    monkeypatch.setattr("app.main.get_provider", lambda *args, **kwargs: StubProvider())
+    monkeypatch.setattr("app.main.run_pipeline", fake_run_pipeline)
+    monkeypatch.setattr("app.main.SSE_HEARTBEAT_SECONDS", 0.01)
+
+    req = AnalyzeRequest(folder_path=str(Path.cwd()), provider="ollama", model="qwen2.5:7b")
+    response = await api_analyze(req, ConnectedRequest())
+
+    chunks = []
+    async for chunk in response.body_iterator:
+        chunks.append(chunk)
+
+    assert any(chunk == ': keep-alive\n\n' for chunk in chunks)
+    assert any('event: done' in chunk for chunk in chunks)

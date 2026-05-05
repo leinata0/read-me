@@ -98,6 +98,7 @@ window.onerror = function (msg, url, line) {
     const settingsDialog = document.getElementById('settings-dialog');
     const settingsBody = document.getElementById('settings-body');
     const settingsSaveBtn = document.getElementById('settings-save-btn');
+    const settingsError = document.getElementById('settings-error');
     const settingsCloseBtn = document.getElementById('settings-close-btn');
     const settingLanguage = document.getElementById('setting-language');
     const settingMaxAnalyze = document.getElementById('setting-max-analyze');
@@ -122,6 +123,43 @@ window.onerror = function (msg, url, line) {
     const feedbackBtn = document.getElementById('feedback-btn');
     const keyStatus = document.getElementById('key-status');
     const keyStatusText = document.getElementById('key-status-text');
+
+    // ========== 统一状态反馈 ==========
+    const statusSection = document.getElementById('status-section');
+    const statusMessage = document.getElementById('status-message');
+    let statusTimer = null;
+
+    function showStatus(message, variant, timeout = 0) {
+        clearTimeout(statusTimer);
+        statusSection.style.display = '';
+        statusSection.dataset.variant = variant;
+        statusMessage.textContent = message;
+        if (timeout > 0) {
+            statusTimer = setTimeout(hideStatus, timeout);
+        }
+    }
+
+    function hideStatus() {
+        clearTimeout(statusTimer);
+        statusSection.style.display = 'none';
+        statusSection.dataset.variant = '';
+        statusMessage.textContent = '';
+    }
+
+    // ========== 流式预览节流 ==========
+    let renderScheduled = false;
+
+    function renderReadmePreview() {
+        renderScheduled = false;
+        readmePreview.innerHTML = safeRender(currentReadme);
+        readmeSource.value = currentReadme;
+        previewSection.style.display = '';
+    }
+    function scheduleReadmeRender() {
+        if (renderScheduled) return;
+        renderScheduled = true;
+        requestAnimationFrame(renderReadmePreview);
+    }
 
     let currentReadme = '';
     let providersData = [];
@@ -336,6 +374,47 @@ window.onerror = function (msg, url, line) {
         };
     }
 
+    function showSettingsError(message) {
+        if (!settingsError) return;
+        settingsError.style.display = '';
+        settingsError.textContent = message;
+    }
+
+    function hideSettingsError() {
+        if (!settingsError) return;
+        settingsError.style.display = 'none';
+        settingsError.textContent = '';
+    }
+
+    function hasEmptyCommaEntry(value) {
+        const trimmed = value.trim();
+        if (!trimmed) return false;
+        return trimmed.split(',').some(part => !part.trim());
+    }
+
+    function parseCommaItems(value) {
+        return value.split(',').map(item => item.trim()).filter(Boolean);
+    }
+
+    function validateSettings(settings) {
+        if (settings.max_tokens_analyze < 4096 || settings.max_tokens_analyze > 131072) {
+            return '分析 max_tokens 必须在 4096 到 131072 之间。';
+        }
+        if (settings.max_tokens_generate < 4096 || settings.max_tokens_generate > 131072) {
+            return '生成 max_tokens 必须在 4096 到 131072 之间。';
+        }
+        if (hasEmptyCommaEntry(settings.include_patterns)) {
+            return '包含文件模式里有空项，请删除多余的逗号。';
+        }
+        if (hasEmptyCommaEntry(settings.exclude_patterns)) {
+            return '排除文件模式里有空项，请删除多余的逗号。';
+        }
+        const customSections = parseCommaItems(settings.custom_sections);
+        const excludeSections = parseCommaItems(settings.exclude_sections);
+        if (new Set(customSections).size !== customSections.length) {
+            return '自定义章节里有重复项，请去重。';
+        }
+
     function getEffectiveApiKeys() {
         const saved = loadSavedKeys();
         const result = {};
@@ -361,14 +440,23 @@ window.onerror = function (msg, url, line) {
         return p.is_configured || !!local.api_key || !!local.base_url || !p.env_key_hint;
     }
 
+        const saved = loadSavedKeys();
+        const local = saved[p.name] || {};
+        return p.is_configured || !!local.api_key || !!local.base_url || !p.env_key_hint;
+    }
+
     // ========== 设置弹窗 ==========
 
     // 设置标签页切换
     document.querySelectorAll('.settings-tab').forEach(btn => {
         btn.addEventListener('click', () => {
-            document.querySelectorAll('.settings-tab').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.settings-tab').forEach(b => {
+                b.classList.remove('active');
+                b.setAttribute('aria-selected', 'false');
+            });
             document.querySelectorAll('.settings-tab-content').forEach(c => c.classList.remove('active'));
             btn.classList.add('active');
+            btn.setAttribute('aria-selected', 'true');
             document.getElementById('stab-' + btn.dataset.stab).classList.add('active');
         });
     });
@@ -386,6 +474,7 @@ window.onerror = function (msg, url, line) {
     settingsBtn.addEventListener('click', () => openSettings());
 
     function openSettings() {
+        hideSettingsError();
         applySettingsToUI();
         // 重置到第一个标签页
         document.querySelectorAll('.settings-tab').forEach((b, i) => b.classList.toggle('active', i === 0));
@@ -427,11 +516,16 @@ window.onerror = function (msg, url, line) {
     }
 
     settingsSaveBtn.addEventListener('click', () => {
-        // Save global settings
-        saveSettings(collectSettingsFromUI());
-
-        // Save provider keys with max_tokens merged in
+        hideSettingsError();
         const settings = collectSettingsFromUI();
+        const validationError = validateSettings(settings);
+        if (validationError) {
+            showSettingsError(validationError);
+            return;
+        }
+
+        saveSettings(settings);
+
         const keys = {};
         settingsBody.querySelectorAll('input[data-provider]').forEach(input => {
             const provider = input.dataset.provider;
@@ -460,6 +554,7 @@ window.onerror = function (msg, url, line) {
             keys[p].temperature = settings.temperature;
         });
         saveKeys(keys);
+        showSuccessStatus('设置已保存');
         settingsDialog.close();
         renderProviderSelect();
     });
@@ -698,9 +793,13 @@ window.onerror = function (msg, url, line) {
 
     tabBtns.forEach(btn => {
         btn.addEventListener('click', () => {
-            tabBtns.forEach(b => b.classList.remove('active'));
+            tabBtns.forEach(b => {
+                b.classList.remove('active');
+                b.setAttribute('aria-selected', 'false');
+            });
             document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
             btn.classList.add('active');
+            btn.setAttribute('aria-selected', 'true');
             document.getElementById(`tab-${btn.dataset.tab}`).classList.add('active');
         });
     });
@@ -708,24 +807,15 @@ window.onerror = function (msg, url, line) {
     // ========== 错误处理 ==========
 
     function showError(msg) {
-        errorMessage.textContent = msg;
-        errorSection.style.display = '';
+        showStatus(msg, 'error');
         progressSection.style.display = 'none';
     }
 
     function hideError() {
-        errorSection.style.display = 'none';
-        errorSection.style.borderColor = '';
-        errorMessage.style.color = '';
+        hideStatus();
     }
 
-    errorDismissBtn.addEventListener('click', hideError);
-
     // ========== 测试连接 ==========
-
-    const testStatus = document.getElementById('test-status');
-    const testStatusText = document.getElementById('test-status-text');
-    let testStatusTimer = null;
 
     function formatConnectionError(message, provider) {
         if (!message) return '连接失败';
@@ -739,30 +829,16 @@ window.onerror = function (msg, url, line) {
     }
 
     function showTestStatus(msg, isError) {
-        clearTimeout(testStatusTimer);
-        testStatus.style.display = '';
-        testStatusText.textContent = msg;
-        testStatusText.style.color = isError ? '#e74c3c' : '#27ae60';
-        if (!isError) {
-            testStatusTimer = setTimeout(() => {
-                testStatus.style.display = 'none';
-            }, 5000);
-        }
+        showStatus(msg, isError ? 'error' : 'success', isError ? 0 : 5000);
     }
 
+
     function showInfoStatus(msg) {
-        clearTimeout(testStatusTimer);
-        testStatus.style.display = '';
-        testStatusText.textContent = msg;
-        testStatusText.style.color = 'var(--pico-muted-color)';
-        testStatusTimer = setTimeout(() => {
-            testStatus.style.display = 'none';
-        }, 2500);
+        showStatus(msg, 'info', 2500);
     }
 
     function hideTestStatus() {
-        clearTimeout(testStatusTimer);
-        testStatus.style.display = 'none';
+        hideStatus();
     }
 
     testBtn.addEventListener('click', async function () {
@@ -934,9 +1010,7 @@ window.onerror = function (msg, url, line) {
             case 'chunk':
                 currentReadme += data.text;
                 streamCharCount += data.text.length;
-                readmePreview.innerHTML = safeRender(currentReadme);
-                readmeSource.value = currentReadme;
-                previewSection.style.display = '';
+                scheduleReadmeRender();
                 // start stats on first chunk
                 if (streamStartTime === 0) {
                     activateStep('generate');
@@ -976,7 +1050,10 @@ window.onerror = function (msg, url, line) {
 
     downloadBtn.addEventListener('click', () => {
         const content = readmeSource.value || currentReadme;
-        if (content) clientDownload(content);
+        if (content) {
+            clientDownload(content);
+            showSuccessStatus('README.md 已开始下载');
+        }
     });
 
     // ========== 重新生成 ==========
@@ -1099,6 +1176,7 @@ window.onerror = function (msg, url, line) {
         readmePreview.innerHTML = safeRender(currentReadme);
         readmeSource.value = currentReadme;
         previewSection.style.display = '';
+        showSuccessStatus('已恢复历史记录');
     }
 
     function renderHistory() {
