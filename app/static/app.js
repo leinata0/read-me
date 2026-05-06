@@ -78,9 +78,6 @@ window.onerror = function (msg, url, line) {
     const statChars = document.getElementById('stat-chars');
     const statTime = document.getElementById('stat-time');
     const statSpeed = document.getElementById('stat-speed');
-    const errorSection = document.getElementById('error-section');
-    const errorMessage = document.getElementById('error-message');
-    const errorDismissBtn = document.getElementById('error-dismiss-btn');
     const previewSection = document.getElementById('preview-section');
     const readmePreview = document.getElementById('readme-preview');
     const readmeSource = document.getElementById('readme-source');
@@ -427,8 +424,7 @@ window.onerror = function (msg, url, line) {
             const local = saved[p.name] || {};
             const hasApiKey = !!local.api_key;
             const hasBaseUrl = !!local.base_url;
-            const requiresApiKey = !!p.env_key_hint;
-            const hasProviderConfig = requiresApiKey ? hasApiKey : (hasApiKey || hasBaseUrl);
+            const hasProviderConfig = hasApiKey || hasBaseUrl;
             if (hasProviderConfig) {
                 result[p.name] = {
                     api_key: local.api_key || '',
@@ -437,6 +433,7 @@ window.onerror = function (msg, url, line) {
                     max_tokens_generate: local.max_tokens_generate || 32768,
                     temperature: local.temperature ?? 0.7,
                 };
+                if (!result[p.name].api_key) delete result[p.name].api_key;
                 if (!result[p.name].base_url) delete result[p.name].base_url;
             }
         });
@@ -823,15 +820,54 @@ window.onerror = function (msg, url, line) {
 
     // ========== 测试连接 ==========
 
-    function formatConnectionError(message, provider) {
+    function formatConnectionError(message, provider, debug) {
         if (!message) return '连接失败';
-        if (provider === 'ollama' && /Cannot reach Ollama/i.test(message)) {
-            return `${message} 请先启动 Ollama，再重试「测试连接」。`;
+        let formatted = message;
+        const isOllamaOffline = provider === 'ollama' && /Cannot reach Ollama/i.test(message);
+        const isUnsupportedModel = /Not supported model|unsupported model|model .*not supported|模型.*不支持/i.test(message);
+        const isAuthError = /Invalid API Key|authentication failed|API key is invalid|rejected the credentials|invalid_key/i.test(message);
+        const isBaseUrlError = /Base URL must|Base URL points|must use HTTPS|does not allow localhost|must not contain embedded credentials/i.test(message);
+        const isConnectionError = /Cannot reach the Anthropic API|Cannot reach .* API|Connection error|timeout|network|连接失败/i.test(message);
+        const isRateLimit = /Rate limited|429|quota/i.test(message);
+
+        if (isOllamaOffline) {
+            formatted = `${message} 请先启动 Ollama，再重试「测试连接」。`;
+        } else if (isUnsupportedModel) {
+            formatted = `${message} 这通常是模型名不受当前渠道支持，请切换为该渠道支持的模型名称后再试。`;
+        } else if (isAuthError) {
+            formatted = `${message} 请重点检查 API Key 是否属于当前渠道、是否完整粘贴，以及是否和当前 Base URL 对应。`;
+        } else if (isBaseUrlError) {
+            formatted = `${message} 请检查 Base URL 是否填写正确，尤其是协议、域名、路径前缀和是否多填了 /v1。`;
+        } else if (isConnectionError) {
+            formatted = `${message} 这更像是网关连通性问题，请检查网络、代理、证书，或稍后重试。`;
+        } else if (isRateLimit) {
+            formatted = `${message} 这通常是限流或额度问题，请稍后重试或更换渠道。`;
         }
-        if (/Base URL/i.test(message)) {
-            return `${message} 请检查 Base URL 是否填写正确。`;
+
+        if (debug && provider === 'anthropic') {
+            const parts = [];
+            if (debug.base_url) parts.push(`Base URL: ${debug.base_url}`);
+            if (debug.base_url_source) parts.push(`Base URL 来源: ${debug.base_url_source}`);
+            if (debug.key_source) parts.push(`API Key 来源: ${debug.key_source}`);
+            if (debug.key_preview) parts.push(`API Key 片段: ${debug.key_preview}`);
+            if (debug.request_key_preview && debug.request_key_preview !== debug.key_preview) parts.push(`网页 Key 片段: ${debug.request_key_preview}`);
+            if (typeof debug.has_request_key === 'boolean') parts.push(`本次请求携带网页 Key: ${debug.has_request_key ? '是' : '否'}`);
+
+            if (isUnsupportedModel) {
+                parts.push('建议：先点击刷新模型列表，或手动改为该渠道支持的模型，例如 mimo-v2.5-pro');
+            } else if (isAuthError) {
+                parts.push('建议：确认这把 Key 正是该网关可用的 Key，而不是其他平台或其他区域的 Key');
+            } else if (isBaseUrlError) {
+                parts.push('建议：逐项检查协议 https://、域名、路径是否应为 /anthropic，以及是否误填了额外后缀');
+            } else if (isConnectionError) {
+                parts.push('建议：如果同一 Key 和模型之前可用，优先怀疑当前网关或本地网络状态');
+            } else if (debug.base_url && debug.base_url_source === 'request') {
+                parts.push('建议：若不确定网关要求，可先清空自定义 Base URL，用官方端点对照测试');
+            }
+
+            if (parts.length) formatted += `\n${parts.join(' | ')}`;
         }
-        return message;
+        return formatted;
     }
 
     function showTestStatus(msg, isError) {
@@ -882,7 +918,7 @@ window.onerror = function (msg, url, line) {
             if (data.ok) {
                 showTestStatus(data.message, false);
             } else {
-                showTestStatus(formatConnectionError(`[${data.code}] ${data.message}`, provider), true);
+                showTestStatus(formatConnectionError(`[${data.code}] ${data.message}`, provider, data.debug), true);
             }
         } catch (err) {
             showTestStatus('连接失败: ' + err.message, true);
@@ -1224,6 +1260,12 @@ window.onerror = function (msg, url, line) {
             });
         });
 
+        historyList.querySelectorAll('[data-action="delete"]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const idx = parseInt(btn.dataset.index);
+                deleteHistory(idx);
+            });
+        });
     }
 
     // ========== 初始化 ==========

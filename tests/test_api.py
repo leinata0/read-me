@@ -116,3 +116,94 @@ def test_api_test_connection_returns_provider_error(monkeypatch):
     assert data["ok"] is False
     assert data["code"] == 503
     assert "Please start Ollama" in data["message"]
+
+
+def test_api_test_connection_accepts_request_base_url_without_local_key(monkeypatch):
+    captured = {}
+
+    def fake_get_provider(provider_name, model=None, api_keys=None, temperature=0.7):
+        captured["provider_name"] = provider_name
+        captured["api_keys"] = api_keys
+
+        class StubProvider:
+            name = "anthropic"
+            debug_context = {
+                "provider": "anthropic",
+                "model": model or "claude-sonnet-4-6",
+                "key_source": "env",
+                "base_url_source": "request",
+                "base_url": "https://proxy.example.com/anthropic",
+            }
+
+            def __init__(self):
+                self.model = model or "claude-sonnet-4-6"
+
+            async def analyze(self, **kwargs):
+                return {"status": "ok"}
+
+        return StubProvider()
+
+    monkeypatch.setattr("app.main.get_provider", fake_get_provider)
+
+    response = client.post(
+        "/api/test-connection",
+        json={
+            "provider": "anthropic",
+            "api_keys": {
+                "anthropic": {
+                    "base_url": "https://proxy.example.com/anthropic"
+                }
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["ok"] is True
+    assert captured["provider_name"] == "anthropic"
+    assert captured["api_keys"]["anthropic"].base_url == "https://proxy.example.com/anthropic"
+
+
+def test_api_test_connection_returns_anthropic_debug_context(monkeypatch):
+    class StubAnthropicProvider:
+        model = "claude-sonnet-4-6"
+        name = "anthropic"
+        debug_context = {
+            "provider": "anthropic",
+            "model": "claude-sonnet-4-6",
+            "key_source": "request",
+            "base_url_source": "env",
+            "base_url": "https://proxy.example.com/v1",
+            "uses_custom_base_url": True,
+        }
+
+        async def analyze(self, **kwargs):
+            raise ProviderError(
+                401,
+                "Anthropic authentication failed. This may be caused by an invalid API key, an incompatible Base URL, or a proxy/gateway configuration issue. Current Base URL: https://proxy.example.com/v1 (source: env).",
+            )
+
+    monkeypatch.setattr("app.main.get_provider", lambda *args, **kwargs: StubAnthropicProvider())
+
+    response = client.post(
+        "/api/test-connection",
+        json={
+            "provider": "anthropic",
+            "model": "claude-sonnet-4-6",
+            "api_keys": {
+                "anthropic": {
+                    "api_key": "sk-ant-demo",
+                }
+            },
+        },
+    )
+
+    assert response.status_code == 401
+    data = response.json()
+    assert data["ok"] is False
+    assert "proxy/gateway configuration issue" in data["message"]
+    assert data["debug"]["provider"] == "anthropic"
+    assert data["debug"]["has_request_key"] is True
+    assert data["debug"]["key_source"] == "request"
+    assert data["debug"]["base_url_source"] == "env"
+    assert data["debug"]["base_url"] == "https://proxy.example.com/v1"

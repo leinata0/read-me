@@ -492,28 +492,17 @@ async def run_pipeline(
     if not snapshots:
         raise ValueError("项目中未找到源代码文件，请确保文件夹中包含代码文件。")
 
-        analysis = await analyze_project(
-            provider,
-            snapshots,
-            existing_readme,
-            on_progress,
-            language,
-            include_patterns,
-            exclude_patterns,
-            feedback_mode=True,
-        )
-    else:
-        await on_progress(f"找到 {len(snapshots)} 个源文件，正在分析...")
-        analysis = await analyze_project(
-            provider,
-            snapshots,
-            existing_readme,
-            on_progress,
-            language,
-            include_patterns,
-            exclude_patterns,
-            feedback_mode=False,
-        )
+    await on_progress(f"找到 {len(snapshots)} 个源文件，正在分析...")
+    analysis = await analyze_project(
+        provider,
+        snapshots,
+        existing_readme,
+        on_progress,
+        language,
+        include_patterns,
+        exclude_patterns,
+        feedback_mode=bool(feedback.strip() or previous_readme.strip()),
+    )
 
     readme = await generate_readme(
         provider, analysis, snapshots, on_progress, on_chunk,

@@ -31,7 +31,7 @@ class ProviderKeys(BaseModel):
 
 class AnalyzeRequest(BaseModel):
     folder_path: str
-    provider: str | None = None
+    provider: str
     model: str | None = None
     api_keys: dict[str, ProviderKeys] = Field(default_factory=dict)
     language: Literal["zh", "en"] = "zh"
@@ -131,7 +131,7 @@ class ListModelsResponse(BaseModel):
 
 
 class TestConnectionRequest(BaseModel):
-    provider: str | None = None
+    provider: str
     model: str | None = None
     api_keys: dict[str, ProviderKeys] = Field(default_factory=dict)
     language: Literal["zh", "en"] = "zh"

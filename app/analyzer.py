@@ -209,13 +209,14 @@ def traverse_project(folder_path: Path, pathspec_obj: pathspec.PathSpec | None =
 
         for filename in files:
             rel_file = os.path.join(rel_root_str, filename) if rel_root_str else filename
+            normalized_rel_file = rel_file.replace("\\", "/")
 
-            if pathspec_obj and pathspec_obj.match_file(rel_file):
+            if pathspec_obj and pathspec_obj.match_file(normalized_rel_file):
                 continue
 
-            if include_list and not any(fnmatch.fnmatch(filename, pat) or fnmatch.fnmatch(rel_file, pat) for pat in include_list):
+            if include_list and not any(fnmatch.fnmatch(filename, pat) or fnmatch.fnmatch(normalized_rel_file, pat) for pat in include_list):
                 continue
-            if exclude_list and any(fnmatch.fnmatch(filename, pat) or fnmatch.fnmatch(rel_file, pat) for pat in exclude_list):
+            if exclude_list and any(fnmatch.fnmatch(filename, pat) or fnmatch.fnmatch(normalized_rel_file, pat) for pat in exclude_list):
                 continue
 
             ext = Path(filename).suffix.lower()

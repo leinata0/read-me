@@ -63,12 +63,26 @@ async def api_list_models(provider_name: str, req: ListModelsRequest):
         return ListModelsResponse(models=cls.available_models, source="fallback", error=str(e)[:200])
 
 
+def _build_provider_debug(req_provider: str, req_model: str | None, req_api_keys: dict) -> dict:
+    keys = (req_api_keys or {}).get(req_provider or "")
+    request_key = getattr(keys, "api_key", "") if keys is not None else ""
+    request_base_url = getattr(keys, "base_url", "") if keys is not None else ""
+    return {
+        "provider": req_provider,
+        "model": req_model or "",
+        "has_request_key": bool(request_key),
+        "has_request_base_url": bool(request_base_url),
+    }
+
+
 @app.post("/api/test-connection")
 async def api_test_connection(req: TestConnectionRequest):
     """Test if the API key and connection work for the selected provider."""
     import time as _time
+    debug = _build_provider_debug(req.provider, req.model, req.api_keys)
     try:
         provider = get_provider(req.provider, req.model, req.api_keys)
+        debug.update(getattr(provider, "debug_context", {}))
         start = _time.time()
         await provider.analyze(
             system_prompt="You are a test assistant. Respond with a short confirmation.",
@@ -82,12 +96,14 @@ async def api_test_connection(req: TestConnectionRequest):
             "provider": provider.name,
             "elapsed_seconds": elapsed,
             "message": f"连接成功！模型 {provider.model} 响应正常（{elapsed}s）",
+            "debug": debug,
         })
     except ProviderError as e:
         return JSONResponse(status_code=e.code, content={
             "ok": False,
             "code": e.code,
             "message": e.message,
+            "debug": debug,
         })
     except Exception as e:
         return JSONResponse(status_code=500, content={

@@ -59,6 +59,13 @@ def _normalize_base_url(base_url: str | None, default_base_url: str, *, allow_lo
     return value.rstrip("/")
 
 
+def _mask_secret(secret: str) -> str:
+    value = (secret or "").strip()
+    if not value:
+        return ""
+    if len(value) <= 10:
+        return f"{value[:2]}...{value[-2:]} (len={len(value)})"
+    return f"{value[:6]}...{value[-4:]} (len={len(value)})"
 
 
 async def _retry_on_transient(coro_factory, *args, **kwargs):
@@ -89,16 +96,36 @@ class AIProvider(ABC):
 
     def __init__(self, model: str | None = None, api_key: str | None = None, base_url: str | None = None,
                  max_tokens_analyze: int = 16384, max_tokens_generate: int = 32768, temperature: float = 0.7):
-        key = api_key or os.environ.get(self.env_key, "")
-        if not key and self.env_key:
+        request_key = (api_key or "").strip()
+        env_key = os.environ.get(self.env_key, "").strip() if self.env_key else ""
+        resolved_key = request_key or env_key
+        resolved_key_source = "request" if request_key else ("env" if env_key else "missing")
+        if not resolved_key and self.env_key:
             raise ProviderError(401, f"API key not configured for {self.display_name}. Set {self.env_key} or enter it in the web UI.")
+
+        request_base_url = (base_url or "").strip()
+        env_base_url = os.environ.get(self.base_url_env_key, "").strip() if self.base_url_env_key else ""
+        resolved_base = request_base_url or env_base_url or self.default_base_url
+        resolved_base_source = "request" if request_base_url else ("env" if env_base_url else "default")
+
         self.model = model or self.default_model
         self.max_tokens_analyze = max_tokens_analyze
         self.max_tokens_generate = max_tokens_generate
         self.temperature = temperature
-        base = base_url or os.environ.get(self.base_url_env_key, "") or self.default_base_url
-        base = _normalize_base_url(base, self.default_base_url, allow_localhost=self.name == "ollama")
-        self._init_client(key, base)
+        self.resolved_api_key_source = resolved_key_source
+        self.resolved_base_url_source = resolved_base_source
+        self.resolved_base_url = _normalize_base_url(resolved_base, self.default_base_url, allow_localhost=self.name == "ollama")
+        self.debug_context = {
+            "provider": self.name,
+            "model": self.model,
+            "key_source": resolved_key_source,
+            "key_preview": _mask_secret(resolved_key),
+            "request_key_preview": _mask_secret(request_key),
+            "base_url_source": resolved_base_source,
+            "base_url": self.resolved_base_url,
+            "uses_custom_base_url": resolved_base_source in {"request", "env"} and bool(self.resolved_base_url),
+        }
+        self._init_client(resolved_key, self.resolved_base_url)
 
     @abstractmethod
     def _init_client(self, api_key: str, base_url: str) -> None: ...
@@ -147,11 +174,12 @@ class AnthropicProvider(AIProvider):
 
     def _init_client(self, api_key: str, base_url: str) -> None:
         from anthropic import AsyncAnthropic
-        kwargs = {"api_key": api_key}
+        kwargs = {"api_key": api_key, "auth_token": ""}
         if base_url:
             kwargs["base_url"] = base_url
             logger.info("Anthropic base_url: %s", base_url)
         self.client = AsyncAnthropic(**kwargs)
+        self.client.auth_token = None
 
     async def analyze(self, system_prompt: str, user_prompt: str, json_schema: dict) -> dict:
         try:
@@ -206,7 +234,7 @@ class AnthropicProvider(AIProvider):
             logger.error("Failed to parse JSON after retry. text=%s...", text[:500] if text else "(empty)")
             raise ProviderError(500, f"Model returned non-JSON response. Response start: {text[:300] if text else '(empty)'}")
         except Exception as e:
-            raise _map_anthropic_error(e)
+            raise _map_anthropic_error(e, self.resolved_base_url, self.resolved_base_url_source)
 
     async def generate_stream(
         self,
@@ -228,7 +256,7 @@ class AnthropicProvider(AIProvider):
                     await on_chunk(text)
             return full_text
         except Exception as e:
-            raise _map_anthropic_error(e)
+            raise _map_anthropic_error(e, self.resolved_base_url, self.resolved_base_url_source)
 
 
 class OpenAICompatibleProvider(AIProvider):
@@ -599,18 +627,43 @@ def _extract_json(text: str) -> dict:
     raise json.JSONDecodeError("No valid JSON found in response", text, 0)
 
 
-def _map_anthropic_error(e: Exception) -> ProviderError:
+def _map_anthropic_error(e: Exception, base_url: str = "", base_url_source: str = "default") -> ProviderError:
     logger.error("Anthropic raw error: %s", repr(e))
+    raw_message = getattr(e, "message", "") or str(e)
+    raw_text = str(raw_message)
+    gateway_message_match = re.search(r"'message': '([^']+)'", raw_text)
+    gateway_type_match = re.search(r"'type': '([^']+)'", raw_text)
+    gateway_message = gateway_message_match.group(1) if gateway_message_match else raw_text[:200]
+    gateway_type = gateway_type_match.group(1) if gateway_type_match else ""
     try:
         from anthropic import AuthenticationError, RateLimitError, BadRequestError, APIConnectionError
         if isinstance(e, AuthenticationError):
-            return ProviderError(401, "Anthropic API key is invalid. Check your API key.")
+            if base_url:
+                extra = f" ({gateway_type})" if gateway_type else ""
+                return ProviderError(
+                    401,
+                    "Anthropic authentication failed through the custom Base URL. "
+                    f"Gateway response: {gateway_message}{extra}. "
+                    "This means the custom endpoint received the request but rejected the credentials. "
+                    f"Current Base URL: {base_url} (source: {base_url_source})."
+                )
+            return ProviderError(
+                401,
+                f"Anthropic authentication failed. Gateway response: {gateway_message}."
+            )
         if isinstance(e, RateLimitError):
             return ProviderError(429, "Rate limited by Anthropic. Please wait and try again.")
         if isinstance(e, BadRequestError):
             return ProviderError(400, f"Anthropic API error: {e.message}")
         if isinstance(e, APIConnectionError):
-            return ProviderError(503, "Cannot reach the Anthropic API. Check your internet connection or base URL.")
+            if base_url:
+                return ProviderError(
+                    503,
+                    "Cannot reach the custom Anthropic-compatible endpoint. "
+                    "The gateway did not complete the request. Check network, proxy, TLS/certificate state, service availability, or Base URL compatibility. "
+                    f"Current Base URL: {base_url} (source: {base_url_source})."
+                )
+            return ProviderError(503, "Cannot reach the Anthropic API. Check your internet connection.")
     except ImportError:
         pass
     return ProviderError(500, f"Unexpected error: {e}")

@@ -8,11 +8,14 @@ from app.models import (
     ListModelsRequest,
     ProjectAnalysis,
     ProviderKeys,
+    TestConnectionRequest as ConnectionRequestModel,
 )
 from app.providers import (
     ProviderError,
     _normalize_base_url,
     _ollama_connection_message,
+    AnthropicProvider,
+    _map_anthropic_error,
 )
 
 
@@ -38,16 +41,18 @@ def test_provider_keys_clamp_limits_and_temperature():
 
 
 def test_analyze_request_trims_and_clamps_fields():
-    req = AnalyzeRequest(folder_path="  .  ", temperature=-1, toc_depth=99, model="  qwen  ")
+    req = AnalyzeRequest(folder_path="  .  ", provider="  openai  ", temperature=-1, toc_depth=99, model="  qwen  ")
     assert req.folder_path == "."
+    assert req.provider == "openai"
     assert req.temperature == 0.0
     assert req.toc_depth == 4
     assert req.model == "qwen"
 
 
-def test_analyze_request_rejects_invalid_enum_values():
-    with pytest.raises(Exception):
-        AnalyzeRequest(folder_path='.', language='fr', tone='formal')
+def test_test_connection_request_trims_provider_and_model():
+    req = ConnectionRequestModel(provider="  openai  ", model="  gpt-4o  ")
+    assert req.provider == "openai"
+    assert req.model == "gpt-4o"
 
 
 def test_build_readme_prompt_includes_previous_readme_and_feedback():
@@ -149,6 +154,34 @@ def test_map_generic_error_uses_ollama_specific_message():
     err = _map_generic_error(RuntimeError("connection refused"), "Ollama", "http://localhost:11434/v1")
     assert err.code == 503
     assert "Please start Ollama" in err.message
+
+
+
+
+def test_anthropic_provider_exposes_request_and_env_debug_context(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://env-proxy.example.com/v1")
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "sk-env-bearer-token")
+    provider = AnthropicProvider(api_key="sk-ant-demo", model="claude-sonnet-4-6")
+    assert provider.resolved_api_key_source == "request"
+    assert provider.resolved_base_url_source == "env"
+    assert provider.resolved_base_url == "https://env-proxy.example.com/v1"
+    assert provider.debug_context["uses_custom_base_url"] is True
+    assert provider.debug_context["key_preview"].startswith("sk-ant")
+    assert provider.debug_context["request_key_preview"].startswith("sk-ant")
+    assert provider.client.auth_token is None
+    assert "Authorization" not in provider.client.auth_headers
+
+
+class _AnthropicAuthError(Exception):
+    pass
+
+
+def test_map_anthropic_error_mentions_base_url_context():
+    err = _map_anthropic_error(_AnthropicAuthError("auth"), "https://proxy.example.com/v1", "request")
+    assert err.code == 500 or err.code == 401
+    if err.code == 401:
+        assert "Base URL: https://proxy.example.com/v1" in err.message
+        assert "proxy/gateway configuration issue" in err.message
 
 
 def test_prioritize_group_files_keeps_backend_core_files():

@@ -68,7 +68,7 @@
 .readme-body h3 { margin-top: 1rem; }
 
 .readme-body pre {
-    background: #f6f8fa;
+    background: var(--pico-code-background-color, var(--pico-muted-border-color));
     border-radius: 6px;
     padding: 1rem;
     overflow-x: auto;
@@ -81,7 +81,7 @@
 }
 
 .readme-body :not(pre) > code {
-    background: #f0f0f0;
+    background: color-mix(in srgb, var(--pico-code-background-color, var(--pico-muted-border-color)) 65%, transparent);
     padding: 0.15em 0.4em;
     border-radius: 3px;
 }
@@ -99,7 +99,7 @@
 }
 
 .readme-body th {
-    background: #f6f8fa;
+    background: color-mix(in srgb, var(--pico-card-background-color, var(--pico-background-color)) 88%, var(--pico-muted-border-color));
     font-weight: 600;
 }
 

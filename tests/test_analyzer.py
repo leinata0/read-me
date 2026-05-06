@@ -48,6 +48,22 @@ def test_traverse_project_rejects_too_many_bytes(tmp_path: Path):
     payload = "x" * (MAX_PROJECT_BYTES + 1024)
     (project_dir / "big.py").write_text(payload, encoding="utf-8")
 
+    with pytest.raises(ValueError, match="项目读取内容过大"):
+        traverse_project(project_dir)
+
+
+
+def test_traverse_project_matches_posix_globs_on_windows_style_relative_paths(tmp_path: Path):
+    project_dir = tmp_path / "glob-project"
+    app_dir = project_dir / "src" / "pkg"
+    app_dir.mkdir(parents=True)
+    (project_dir / "requirements.txt").write_text("fastapi\n", encoding="utf-8")
+    (app_dir / "main.py").write_text("print('ok')\n", encoding="utf-8")
+    (app_dir / "ignore.txt").write_text("ignore\n", encoding="utf-8")
+
+    snapshots, _ = traverse_project(project_dir, include_patterns="src/**/*.py")
+
+    assert [snapshot.relative_path.replace("\\", "/") for snapshot in snapshots] == ["src/pkg/main.py"]
 
 
 
