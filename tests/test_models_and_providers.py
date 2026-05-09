@@ -8,7 +8,6 @@ from app.models import (
     ListModelsRequest,
     ProjectAnalysis,
     ProviderKeys,
-    TestConnectionRequest as ConnectionRequestModel,
 )
 from app.providers import (
     ProviderError,

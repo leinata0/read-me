@@ -9,7 +9,6 @@ from app.analyzer import (
     validate_path, load_gitignore_patterns, traverse_project,
     estimate_total_tokens, compute_project_hash, prioritize_files,
     split_analysis_groups, should_use_concurrent_analysis, prioritize_group_files,
-    ENTRY_NAMES,
 )
 from app.models import FileSnapshot, ProjectAnalysis, GenerateResponse
 from app.providers import AIProvider, _retry_on_transient
