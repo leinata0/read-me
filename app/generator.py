@@ -519,6 +519,7 @@ async def generate_readme(
     link_style: str = "inline",
     section_order: str = "",
     audience: str = "developer",
+    quality_mode: str = "balanced",
 ) -> str:
     await on_progress("正在生成 README...")
 
@@ -579,7 +580,7 @@ async def run_pipeline(
     readme = await generate_readme(
         provider, analysis, snapshots, on_progress, on_chunk,
         language, tone, include_badges, custom_sections, exclude_sections, custom_prompt_suffix,
-        feedback, previous_readme, badge_style, toc_depth, code_examples, link_style, section_order, audience,
+        feedback, previous_readme, badge_style, toc_depth, code_examples, link_style, section_order, audience, quality_mode,
     )
 
     return GenerateResponse(
