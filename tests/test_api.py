@@ -14,13 +14,17 @@ def test_api_analyze_rejects_sensitive_directory(monkeypatch):
         model = "qwen2.5:7b"
         name = "ollama"
 
+    def fake_validate_path(folder_path: str):
+        raise ValueError("Invalid path. Please select a project folder instead of a personal or sensitive directory.")
+
     monkeypatch.setattr("app.main.get_provider", lambda *args, **kwargs: StubProvider())
+    monkeypatch.setattr("app.generator.validate_path", fake_validate_path)
 
     response = client.post(
         "/api/analyze",
         json={
             "source_type": "local_path",
-            "folder_path": str(Path.home() / "Downloads"),
+            "folder_path": "/fake/path",
             "provider": "ollama",
             "model": "qwen2.5:7b",
         },
