@@ -276,26 +276,41 @@ class OpenAICompatibleProvider(AIProvider):
         self.client = AsyncOpenAI(**kwargs)
 
     async def analyze(self, system_prompt: str, user_prompt: str, json_schema: dict) -> dict:
+        schema_str = json.dumps(json_schema, ensure_ascii=False)
+        prompt = (
+            f"{user_prompt}\n\n"
+            f"IMPORTANT: Respond with valid JSON matching this schema:\n{schema_str}\n"
+            f"Respond ONLY with the JSON object, no other text."
+        )
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": prompt},
+        ]
         try:
-            schema_str = json.dumps(json_schema, ensure_ascii=False)
-            prompt = (
-                f"{user_prompt}\n\n"
-                f"IMPORTANT: Respond with valid JSON matching this schema:\n{schema_str}\n"
-                f"Respond ONLY with the JSON object, no other text."
-            )
             response = await self.client.chat.completions.create(
                 model=self.model,
                 max_tokens=self.max_tokens_analyze,
                 temperature=self.temperature,
                 response_format={"type": "json_object"},
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": prompt},
-                ],
+                messages=messages,
             )
             text = response.choices[0].message.content or "{}"
             return _extract_json(text)
         except Exception as e:
+            from openai import BadRequestError
+            if isinstance(e, BadRequestError):
+                logger.warning("response_format may not be supported for %s, retrying without it", self.model)
+                try:
+                    response = await self.client.chat.completions.create(
+                        model=self.model,
+                        max_tokens=self.max_tokens_analyze,
+                        temperature=self.temperature,
+                        messages=messages,
+                    )
+                    text = response.choices[0].message.content or "{}"
+                    return _extract_json(text)
+                except Exception as e2:
+                    raise _map_openai_error(e2, self.display_name, getattr(self.client, "base_url", "") and str(self.client.base_url))
             raise _map_openai_error(e, self.display_name, getattr(self.client, "base_url", "") and str(self.client.base_url))
 
     async def generate_stream(
