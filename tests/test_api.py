@@ -9,7 +9,13 @@ from app.models import ProviderError
 client = TestClient(app)
 
 
-def test_api_analyze_rejects_sensitive_directory():
+def test_api_analyze_rejects_sensitive_directory(monkeypatch):
+    class StubProvider:
+        model = "qwen2.5:7b"
+        name = "ollama"
+
+    monkeypatch.setattr("app.main.get_provider", lambda *args, **kwargs: StubProvider())
+
     response = client.post(
         "/api/analyze",
         json={
