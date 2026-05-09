@@ -3,9 +3,14 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import shutil
+import tempfile
 from pathlib import Path
 from typing import AsyncGenerator
+from urllib.parse import urlparse
+from zipfile import ZipFile
 
+import httpx
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
@@ -20,8 +25,11 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 
 BASE_DIR = Path(__file__).resolve().parent
+REPO_CACHE_DIR = BASE_DIR.parent / ".cache" / "repo-imports"
 SSE_QUEUE_MAXSIZE = 256
 SSE_HEARTBEAT_SECONDS = 10
+MAX_REPO_ARCHIVE_BYTES = 25 * 1024 * 1024
+SUPPORTED_REPO_HOSTS = {"github.com", "www.github.com"}
 
 app = FastAPI(title="README Generator", version="1.2.0")
 
@@ -73,6 +81,80 @@ def _build_provider_debug(req_provider: str, req_model: str | None, req_api_keys
         "has_request_key": bool(request_key),
         "has_request_base_url": bool(request_base_url),
     }
+
+
+def _normalize_repo_url(repo_url: str) -> str:
+    value = repo_url.strip()
+    if not value:
+        raise ProviderError(400, "repo_url is required for repo_url mode")
+    parsed = urlparse(value)
+    if parsed.scheme != "https" or not parsed.netloc:
+        raise ProviderError(400, "仓库 URL 必须是有效的 HTTPS 地址。")
+    hostname = (parsed.hostname or "").lower()
+    if hostname not in SUPPORTED_REPO_HOSTS:
+        raise ProviderError(400, "当前仅支持 GitHub 公开仓库 URL。")
+    parts = [part for part in parsed.path.split("/") if part]
+    if len(parts) < 2:
+        raise ProviderError(400, "仓库 URL 格式不正确，请使用 https://github.com/owner/repo")
+    owner, repo = parts[0], parts[1]
+    if repo.endswith(".git"):
+        repo = repo[:-4]
+    if not owner or not repo:
+        raise ProviderError(400, "仓库 URL 格式不正确，请使用 https://github.com/owner/repo")
+    return f"https://github.com/{owner}/{repo}"
+
+
+async def _download_github_repo_to_tempdir(repo_url: str) -> tuple[str, str]:
+    normalized = _normalize_repo_url(repo_url)
+    owner, repo = normalized.removeprefix("https://github.com/").split("/", 1)
+    archive_candidates = [
+        f"https://codeload.github.com/{owner}/{repo}/zip/refs/heads/main",
+        f"https://codeload.github.com/{owner}/{repo}/zip/refs/heads/master",
+    ]
+
+    REPO_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    temp_root = Path(tempfile.mkdtemp(prefix="job-", dir=str(REPO_CACHE_DIR)))
+    archive_path = temp_root / "repo.zip"
+
+    try:
+        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+            last_status = None
+            for archive_url in archive_candidates:
+                resp = await client.get(archive_url)
+                last_status = resp.status_code
+                if resp.status_code == 200:
+                    if len(resp.content) > MAX_REPO_ARCHIVE_BYTES:
+                        raise ProviderError(400, "仓库归档过大，请改用本地路径模式或缩小仓库范围。")
+                    archive_path.write_bytes(resp.content)
+                    break
+            else:
+                if last_status == 404:
+                    raise ProviderError(404, "未找到公开仓库，或默认分支不是 main/master。")
+                raise ProviderError(502, f"拉取仓库归档失败 (HTTP {last_status})")
+
+        with ZipFile(archive_path) as zf:
+            members = zf.infolist()
+            if len(members) > 5000:
+                raise ProviderError(400, "仓库归档文件过多，请改用本地路径模式或缩小仓库范围。")
+            extract_dir = temp_root / "repo"
+            extract_dir.mkdir(parents=True, exist_ok=True)
+            total_uncompressed = 0
+            for member in members:
+                member_path = Path(member.filename)
+                if member_path.is_absolute() or ".." in member_path.parts:
+                    raise ProviderError(400, "仓库归档包含非法路径，已拒绝处理。")
+                total_uncompressed += member.file_size
+                if total_uncompressed > MAX_REPO_ARCHIVE_BYTES * 4:
+                    raise ProviderError(400, "仓库解压内容过大，请改用本地路径模式或缩小仓库范围。")
+            zf.extractall(extract_dir)
+
+        children = [item for item in extract_dir.iterdir()]
+        if len(children) == 1 and children[0].is_dir():
+            return str(children[0]), str(temp_root)
+        return str(extract_dir), str(temp_root)
+    except Exception:
+        shutil.rmtree(temp_root, ignore_errors=True)
+        raise
 
 
 @app.post("/api/test-connection")
@@ -148,10 +230,17 @@ async def api_analyze(req: AnalyzeRequest, request: Request):
         await push_event(f"event: chunk\ndata: {data}\n\n")
 
     async def background_task():
+        temp_root_to_cleanup: str | None = None
         try:
             provider = get_provider(req.provider, req.model, req.api_keys, req.temperature)
+            if req.source_type == "repo_url":
+                await on_progress("正在拉取公开仓库...")
+                working_dir, temp_root_to_cleanup = await _download_github_repo_to_tempdir(req.repo_url)
+            else:
+                working_dir = req.folder_path
+
             result = await run_pipeline(
-                folder_path=req.folder_path,
+                folder_path=working_dir,
                 provider=provider,
                 on_progress=on_progress,
                 on_chunk=on_chunk,
@@ -171,7 +260,9 @@ async def api_analyze(req: AnalyzeRequest, request: Request):
                 link_style=req.link_style,
                 section_order=req.section_order,
                 audience=req.audience,
+                quality_mode=req.quality_mode,
             )
+
             done_data = json.dumps({"model": result.model, "provider": result.provider}, ensure_ascii=False)
             await push_event(f"event: done\ndata: {done_data}\n\n")
         except asyncio.CancelledError:
@@ -198,6 +289,8 @@ async def api_analyze(req: AnalyzeRequest, request: Request):
             err = json.dumps({"code": 500, "message": str(e)[:300]}, ensure_ascii=False)
             await push_event(f"event: error\ndata: {err}\n\n")
         finally:
+            if temp_root_to_cleanup:
+                shutil.rmtree(temp_root_to_cleanup, ignore_errors=True)
             await queue.put(None)
 
     async def event_stream() -> AsyncGenerator[str, None]:

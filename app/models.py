@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class ProviderKeys(BaseModel):
@@ -30,7 +30,9 @@ class ProviderKeys(BaseModel):
 
 
 class AnalyzeRequest(BaseModel):
-    folder_path: str
+    source_type: Literal["local_path", "repo_url"] = "repo_url"
+    folder_path: str = ""
+    repo_url: str = ""
     provider: str
     model: str | None = None
     api_keys: dict[str, ProviderKeys] = Field(default_factory=dict)
@@ -51,14 +53,12 @@ class AnalyzeRequest(BaseModel):
     link_style: Literal["inline", "reference"] = "inline"
     section_order: str = ""
     audience: Literal["developer", "user", "contributor"] = "developer"
+    quality_mode: Literal["balanced", "high"] = "balanced"
 
-    @field_validator("folder_path")
+    @field_validator("folder_path", "repo_url")
     @classmethod
-    def validate_folder_path(cls, value: str) -> str:
-        value = value.strip()
-        if not value:
-            raise ValueError("folder_path is required")
-        return value[:500]
+    def trim_source_fields(cls, value: str) -> str:
+        return value.strip()[:1000]
 
     @field_validator(
         "provider", "model", "custom_sections", "exclude_sections", "custom_prompt_suffix",
@@ -79,6 +79,14 @@ class AnalyzeRequest(BaseModel):
     @classmethod
     def validate_toc_depth(cls, value: int) -> int:
         return min(max(value, 1), 4)
+
+    @model_validator(mode="after")
+    def validate_source_fields(self) -> "AnalyzeRequest":
+        if self.source_type == "local_path" and not self.folder_path:
+            raise ValueError("folder_path is required for local_path mode")
+        if self.source_type == "repo_url" and not self.repo_url:
+            raise ValueError("repo_url is required for repo_url mode")
+        return self
 
 
 class ProviderInfo(BaseModel):

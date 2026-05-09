@@ -13,6 +13,7 @@ def test_api_analyze_rejects_sensitive_directory():
     response = client.post(
         "/api/analyze",
         json={
+            "source_type": "local_path",
             "folder_path": str(Path.home() / "Downloads"),
             "provider": "ollama",
             "model": "qwen2.5:7b",
@@ -44,6 +45,7 @@ def test_api_analyze_passes_previous_readme_to_pipeline(monkeypatch):
     response = client.post(
         "/api/analyze",
         json={
+            "source_type": "local_path",
             "folder_path": str(Path.cwd()),
             "provider": "ollama",
             "model": "qwen2.5:7b",
@@ -78,6 +80,7 @@ def test_api_analyze_emits_progress_chunk_and_done(monkeypatch):
     response = client.post(
         "/api/analyze",
         json={
+            "source_type": "local_path",
             "folder_path": str(Path.cwd()),
             "provider": "ollama",
             "model": "qwen2.5:7b",
@@ -91,6 +94,45 @@ def test_api_analyze_emits_progress_chunk_and_done(monkeypatch):
     assert "event: chunk" in body
     assert '# Title' in body
     assert "event: done" in body
+
+
+def test_api_analyze_repo_url_mode_calls_repo_resolver(monkeypatch):
+    captured = {}
+
+    class StubProvider:
+        model = "qwen2.5:7b"
+        name = "ollama"
+
+    async def fake_run_pipeline(**kwargs):
+        captured.update(kwargs)
+        from app.models import GenerateResponse
+        return GenerateResponse(readme="# repo", model="qwen2.5:7b", provider="ollama")
+
+    async def fake_download_repo(repo_url):
+        captured["repo_url"] = repo_url
+        return str(Path.cwd()), None
+
+    monkeypatch.setattr("app.main.get_provider", lambda *args, **kwargs: StubProvider())
+    monkeypatch.setattr("app.main.run_pipeline", fake_run_pipeline)
+    monkeypatch.setattr("app.main._download_github_repo_to_tempdir", fake_download_repo)
+
+    response = client.post(
+        "/api/analyze",
+        json={
+            "source_type": "repo_url",
+            "repo_url": "https://github.com/example/project",
+            "provider": "ollama",
+            "model": "qwen2.5:7b",
+            "quality_mode": "high",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.text
+    assert "event: done" in body
+    assert captured["repo_url"] == "https://github.com/example/project"
+    assert captured["folder_path"] == str(Path.cwd())
+    assert captured["quality_mode"] == "high"
 
 
 def test_api_test_connection_returns_provider_error(monkeypatch):

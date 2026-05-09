@@ -65,10 +65,10 @@ else:
         "/etc", "/usr", "/System", "/Library", "/boot", "/dev", "/proc", "/sys",
     ]
 
-MAX_FILE_BYTES = 32 * 1024  # 32KB
+MAX_FILE_BYTES = 96 * 1024
 MAX_PATH_LENGTH = 500
-MAX_PROJECT_FILES = 2000
-MAX_PROJECT_BYTES = 8 * 1024 * 1024  # 8MB of source/config text before truncation
+MAX_PROJECT_FILES = 3000
+MAX_PROJECT_BYTES = 20 * 1024 * 1024
 
 ENTRY_NAMES: set[str] = {"main", "app", "index", "server", "cli", "run"}
 PROJECT_DIR_MARKERS: set[str] = {
@@ -173,11 +173,14 @@ def _read_file_content(file_path: Path) -> str:
         with open(file_path, encoding="utf-8", errors="replace") as f:
             if size <= MAX_FILE_BYTES:
                 return f.read()
-            head_size = MAX_FILE_BYTES // 2
-            head = f.read(head_size)
-            f.seek(max(0, size - head_size))
+            chunk_size = MAX_FILE_BYTES // 3
+            head = f.read(chunk_size)
+            middle_seek = max(0, size // 2 - chunk_size // 2)
+            f.seek(middle_seek)
+            middle = f.read(chunk_size)
+            f.seek(max(0, size - chunk_size))
             tail = f.read()
-            return head + "\n\n... [truncated] ...\n\n" + tail
+            return head + "\n\n... [middle excerpt] ...\n\n" + middle + "\n\n... [tail excerpt] ...\n\n" + tail
     except (OSError, PermissionError):
         return ""
 
@@ -231,11 +234,11 @@ def traverse_project(folder_path: Path, pathspec_obj: pathspec.PathSpec | None =
                 existing_readme = _read_file_content(full_path)
                 continue
 
+            file_size = full_path.stat().st_size
             content = _read_file_content(full_path)
             if not content:
                 continue
 
-            file_size = full_path.stat().st_size
             total_bytes += file_size
             snapshots.append(FileSnapshot(
                 path=str(full_path),
@@ -315,6 +318,7 @@ def split_analysis_groups(snapshots: list[FileSnapshot]) -> dict[str, list[FileS
         "backend": [],
         "frontend": [],
         "tests": [],
+        "docs": [],
     }
     for snapshot in snapshots:
         rel_path = snapshot.relative_path.replace('\\', '/').lower()
@@ -327,6 +331,9 @@ def split_analysis_groups(snapshots: list[FileSnapshot]) -> dict[str, list[FileS
         if rel_path.startswith('tests/') or '/tests/' in rel_path or name.startswith('test_'):
             groups["tests"].append(snapshot)
             continue
+        if rel_path.endswith('.md') or rel_path.startswith(('docs/', 'examples/')):
+            groups["docs"].append(snapshot)
+            continue
         if rel_path.endswith(('.js', '.ts', '.tsx', '.html')) or '/templates/' in rel_path:
             groups["frontend"].append(snapshot)
             continue
@@ -337,10 +344,8 @@ def split_analysis_groups(snapshots: list[FileSnapshot]) -> dict[str, list[FileS
     return {group_name: items for group_name, items in groups.items() if items}
 
 
-
-def should_use_concurrent_analysis(snapshots: list[FileSnapshot], token_threshold: int = 12_000, file_threshold: int = 12) -> bool:
+def should_use_concurrent_analysis(snapshots: list[FileSnapshot], token_threshold: int = 24_000, file_threshold: int = 24) -> bool:
     return len(snapshots) >= file_threshold or estimate_total_tokens(snapshots) > token_threshold
-
 
 
 def prioritize_group_files(group_name: str, snapshots: list[FileSnapshot], max_tokens: int) -> list[FileSnapshot]:
@@ -379,6 +384,10 @@ def prioritize_group_files(group_name: str, snapshots: list[FileSnapshot], max_t
             if rel_path.endswith('.html'):
                 return (2, snapshot.size_bytes, rel_path)
             return (3, snapshot.size_bytes, rel_path)
+        if group_name == 'docs':
+            if rel_path.endswith('readme.md') or rel_path == 'readme':
+                return (0, snapshot.size_bytes, rel_path)
+            return (1, snapshot.size_bytes, rel_path)
         if name.startswith('test_'):
             return (0, snapshot.size_bytes, rel_path)
         return (1, snapshot.size_bytes, rel_path)

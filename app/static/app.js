@@ -64,6 +64,10 @@ window.onerror = function (msg, url, line) {
 
     // --- DOM ---
     const form = document.getElementById('analyze-form');
+    const sourceTypeSelect = document.getElementById('source-type');
+    const repoUrlGroup = document.getElementById('repo-url-group');
+    const repoUrlInput = document.getElementById('repo-url');
+    const folderPathGroup = document.getElementById('folder-path-group');
     const folderInput = document.getElementById('folder-path');
     const providerSelect = document.getElementById('provider-select');
 
@@ -115,7 +119,7 @@ window.onerror = function (msg, url, line) {
     const settingCodeExamples = document.getElementById('setting-code-examples');
     const settingLinkStyle = document.getElementById('setting-link-style');
     const settingSectionOrder = document.getElementById('setting-section-order');
-    const settingAudience = document.getElementById('setting-audience');
+    const settingQualityMode = document.getElementById('setting-quality-mode');
     const feedbackInput = document.getElementById('feedback-input');
     const feedbackBtn = document.getElementById('feedback-btn');
     const keyStatus = document.getElementById('key-status');
@@ -167,6 +171,28 @@ window.onerror = function (msg, url, line) {
     let streamStartTime = 0;
     let streamCharCount = 0;
     let statsTimer = null;
+
+    function getSourceType() {
+        return sourceTypeSelect ? sourceTypeSelect.value : 'repo_url';
+    }
+
+    function getSourcePayload() {
+        const sourceType = getSourceType();
+        return {
+            source_type: sourceType,
+            repo_url: sourceType === 'repo_url' ? repoUrlInput.value.trim() : '',
+            folder_path: sourceType === 'local_path' ? folderInput.value.trim() : '',
+        };
+    }
+
+    function updateSourceModeUI() {
+        const sourceType = getSourceType();
+        const isRepoMode = sourceType === 'repo_url';
+        if (repoUrlGroup) repoUrlGroup.style.display = isRepoMode ? '' : 'none';
+        if (folderPathGroup) folderPathGroup.style.display = isRepoMode ? 'none' : '';
+        if (repoUrlInput) repoUrlInput.required = isRepoMode;
+        if (folderInput) folderInput.required = !isRepoMode;
+    }
 
     function resetSteps() {
         currentStepIndex = -1;
@@ -329,8 +355,8 @@ window.onerror = function (msg, url, line) {
     function applySettingsToUI() {
         const s = loadSettings();
         settingLanguage.value = s.language || 'zh';
-        settingMaxAnalyze.value = s.max_tokens_analyze || 16384;
-        settingMaxGenerate.value = s.max_tokens_generate || 32768;
+        settingMaxAnalyze.value = s.max_tokens_analyze || (s.quality_mode === 'high' ? 32768 : 16384);
+        settingMaxGenerate.value = s.max_tokens_generate || (s.quality_mode === 'high' ? 65536 : 32768);
         settingTone.value = s.tone || 'professional';
         settingTemperature.value = s.temperature ?? 0.7;
         tempValue.textContent = s.temperature ?? 0.7;
@@ -346,7 +372,7 @@ window.onerror = function (msg, url, line) {
         settingCodeExamples.value = s.code_examples || 'normal';
         settingLinkStyle.value = s.link_style || 'inline';
         settingSectionOrder.value = s.section_order || '';
-        settingAudience.value = s.audience || 'developer';
+        settingQualityMode.value = s.quality_mode || 'balanced';
     }
 
     function collectSettingsFromUI() {
@@ -367,7 +393,7 @@ window.onerror = function (msg, url, line) {
             code_examples: settingCodeExamples.value,
             link_style: settingLinkStyle.value,
             section_order: settingSectionOrder.value.trim(),
-            audience: settingAudience.value,
+            quality_mode: settingQualityMode.value,
         };
     }
 
@@ -411,8 +437,13 @@ window.onerror = function (msg, url, line) {
         if (new Set(customSections).size !== customSections.length) {
             return '自定义章节里有重复项，请去重。';
         }
-        if (new Set(excludeSections).size !== excludeSections.length) {
-            return '排除章节里有重复项，请去重。';
+        if (settings.quality_mode === 'high') {
+            if (settings.max_tokens_analyze < 16384) {
+                return '高质量模式建议将分析 max_tokens 设为至少 16384。';
+            }
+            if (settings.max_tokens_generate < 32768) {
+                return '高质量模式建议将生成 max_tokens 设为至少 32768。';
+            }
         }
         return '';
     }
@@ -479,7 +510,14 @@ window.onerror = function (msg, url, line) {
         });
     });
 
+    if (sourceTypeSelect) {
+        sourceTypeSelect.addEventListener('change', () => {
+            updateSourceModeUI();
+        });
+    }
+
     settingsBtn.addEventListener('click', () => openSettings());
+
 
     function openSettings() {
         hideSettingsError();
@@ -949,8 +987,9 @@ window.onerror = function (msg, url, line) {
         testBtn.style.display = 'none';
 
         const savedSettings = loadSettings();
+        const sourcePayload = getSourcePayload();
         const body = {
-            folder_path: folderInput.value.trim(),
+            ...sourcePayload,
             provider: providerSelect.value || null,
             model: modelInput.value.trim() || null,
             api_keys: getEffectiveApiKeys(),
@@ -970,7 +1009,7 @@ window.onerror = function (msg, url, line) {
             code_examples: savedSettings.code_examples || 'normal',
             link_style: savedSettings.link_style || 'inline',
             section_order: savedSettings.section_order || '',
-            audience: savedSettings.audience || 'developer',
+            quality_mode: savedSettings.quality_mode || 'balanced',
         };
 
         currentAbortController = new AbortController();
@@ -1073,7 +1112,9 @@ window.onerror = function (msg, url, line) {
                 if (currentReadme) {
                     saveHistory({
                         timestamp: Date.now(),
+                        source_type: getSourceType(),
                         folder_path: folderInput.value.trim(),
+                        repo_url: repoUrlInput ? repoUrlInput.value.trim() : '',
                         provider: data.provider || providerSelect.value,
                         model: data.model || modelInput.value,
                         readme: currentReadme,
@@ -1205,7 +1246,12 @@ window.onerror = function (msg, url, line) {
 
     function restoreHistoryEntry(entry) {
         if (!entry) return;
+        if (sourceTypeSelect) {
+            sourceTypeSelect.value = entry.source_type || (entry.repo_url ? 'repo_url' : 'local_path');
+            updateSourceModeUI();
+        }
         folderInput.value = entry.folder_path || '';
+        if (repoUrlInput) repoUrlInput.value = entry.repo_url || '';
 
         if (entry.provider && providersData.some(p => p.name === entry.provider && isProviderReady(p))) {
             providerSelect.value = entry.provider;
@@ -1240,9 +1286,10 @@ window.onerror = function (msg, url, line) {
             item.className = 'history-item';
             const date = new Date(entry.timestamp);
             const timeStr = date.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+            const sourceLabel = entry.source_type === 'repo_url' ? (entry.repo_url || '仓库 URL') : (entry.folder_path || '本地路径');
             item.innerHTML = `
                 <span class="history-info">
-                    <strong>${escapeHtml(entry.folder_path.split(/[\\/]/).pop() || entry.folder_path)}</strong>
+                    <strong>${escapeHtml(sourceLabel.split(/[\\/]/).pop() || sourceLabel)}</strong>
                     <small>${timeStr} | ${escapeHtml(entry.provider)} | ${escapeHtml(entry.model)}</small>
                 </span>
                 <span class="history-actions">
@@ -1269,6 +1316,7 @@ window.onerror = function (msg, url, line) {
     }
 
     // ========== 初始化 ==========
+    updateSourceModeUI();
     loadProviders();
     renderHistory();
 })();

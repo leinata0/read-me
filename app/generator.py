@@ -24,6 +24,8 @@ ANALYSIS_SYSTEM_PROMPT_ZH = """\
 - 所有依赖及其分类（运行时/开发/测试）
 - 入口文件（主脚本、服务器文件、CLI 入口）
 - 关键架构模式和设计决策
+- README 应该覆盖的真实使用方式、部署方式、配置方式、开发方式
+- 项目中最值得展示的代码路径和示例来源
 """
 
 ANALYSIS_SYSTEM_PROMPT_EN = """\
@@ -36,6 +38,8 @@ Be thorough and accurate. Identify:
 - All dependencies with their categories (runtime/dev/test)
 - Entry point files (main scripts, server files, CLI entry points)
 - Key architectural patterns and design decisions
+- The real usage, deployment, configuration, and development workflows the README should explain
+- The most representative code paths and example sources worth showing in the README
 """
 
 GENERATION_SYSTEM_PROMPT_ZH = """\
@@ -43,10 +47,10 @@ GENERATION_SYSTEM_PROMPT_ZH = """\
 
 要求：
 - 用中文撰写（代码块、命令、技术术语保持英文原文）
-- 写一段有吸引力的项目描述（具体针对此项目，不要泛泛而谈）
+- 写一段有吸引力且准确的项目描述，必须基于项目真实实现，而不是模板化概括
 - 包含目录
 - 安装章节：使用项目语言/生态系统的精确命令
-- 使用章节：提供可运行的代码示例
+- 使用章节：提供真实、可运行、贴近项目结构的代码示例
 - 依赖章节：列出关键运行时依赖
 - 简要架构概述
 - 检测到 License 时添加许可证章节
@@ -54,16 +58,17 @@ GENERATION_SYSTEM_PROMPT_ZH = """\
 - 如果发现了已有的 README，保留其中未涵盖的重要内容
 - 使用规范的 Markdown 格式：标题、代码块、链接
 - 输出应是生产级别的，而非模板
+- 如果信息不足，不要编造；优先根据上下文谨慎表述
 """
 
 GENERATION_SYSTEM_PROMPT_EN = """\
 You are a technical writer creating a high-quality README.md for a software project.
 
 Requirements:
-- Write a compelling project description (not generic, specific to this project)
+- Write a compelling and accurate project description grounded in the real implementation, not a template summary
 - Include a table of contents
 - Installation section with exact commands for the project's language/ecosystem
-- Usage section with realistic, runnable code examples
+- Usage section with realistic, runnable code examples aligned with the actual project structure
 - Dependencies section listing key runtime dependencies
 - Brief architecture overview
 - License section if detectable
@@ -71,25 +76,25 @@ Requirements:
 - If an existing README was found, preserve any important content not covered above
 - Use proper markdown formatting with headers, code blocks, links
 - Make it production-ready, not a template
+- If information is incomplete, do not invent details; prefer cautious, evidence-based phrasing
 """
 
-
-
 GROUP_ANALYSIS_BUDGETS = {
-    "config": 3_000,
-    "backend": 6_000,
-    "frontend": 4_000,
-    "tests": 2_000,
+    "config": 8_000,
+    "backend": 18_000,
+    "frontend": 14_000,
+    "tests": 6_000,
+    "docs": 8_000,
 }
 
 GROUP_ANALYSIS_INSTRUCTIONS = {
     "config": {
-        "zh": "重点提取项目名称、依赖、安装运行方式、环境配置和 CI/工作流信息。",
-        "en": "Focus on project name, dependencies, installation/run commands, environment config, and CI/workflow details.",
+        "zh": "重点提取项目名称、依赖、安装运行方式、环境配置、部署方式和 CI/工作流信息。",
+        "en": "Focus on project name, dependencies, installation/run commands, environment config, deployment shape, and CI/workflow details.",
     },
     "backend": {
-        "zh": "重点提取后端入口、核心调用链、服务能力、数据模型和架构要点。",
-        "en": "Focus on backend entry points, call flows, service capabilities, data models, and architectural decisions.",
+        "zh": "重点提取后端入口、核心调用链、服务能力、数据模型、接口约定和架构要点。",
+        "en": "Focus on backend entry points, call flows, service capabilities, data models, interface contracts, and architectural decisions.",
     },
     "frontend": {
         "zh": "重点提取用户界面能力、前端交互流程、设置项和用户可见功能。",
@@ -99,7 +104,112 @@ GROUP_ANALYSIS_INSTRUCTIONS = {
         "zh": "重点提取测试命令、验证方式、开发/调试辅助信息，以及 README 中应保留的重要说明。",
         "en": "Focus on test commands, verification methods, developer/debugging hints, and important README-worthy notes.",
     },
+    "docs": {
+        "zh": "重点提取现有文档、示例、FAQ、运维说明和对 README 有帮助的解释性内容。",
+        "en": "Focus on existing docs, examples, FAQ, ops notes, and explanatory content useful for the README.",
+    },
 }
+
+_analysis_cache: dict[str, tuple[ProjectAnalysis, float]] = {}
+CACHE_TTL = 10 * 60
+CACHE_MAX_SIZE = 50
+
+
+def _evict_expired_cache() -> None:
+    now = time.time()
+    expired = [k for k, (_, ts) in _analysis_cache.items() if now - ts >= CACHE_TTL]
+    for k in expired:
+        del _analysis_cache[k]
+    if len(_analysis_cache) > CACHE_MAX_SIZE:
+        sorted_keys = sorted(_analysis_cache, key=lambda k: _analysis_cache[k][1])
+        for k in sorted_keys[:len(_analysis_cache) - CACHE_MAX_SIZE]:
+            del _analysis_cache[k]
+
+
+def _build_analysis_cache_key(
+    snapshots: list[FileSnapshot],
+    language: str,
+    include_patterns: str = "",
+    exclude_patterns: str = "",
+    feedback_mode: bool = False,
+    existing_readme: str | None = None,
+    quality_mode: str = "balanced",
+) -> str:
+    base_hash = compute_project_hash(snapshots)
+    readme_hash = ""
+    if existing_readme:
+        readme_hash = compute_project_hash([
+            FileSnapshot(
+                path="existing_readme",
+                relative_path="README.md",
+                language="markdown",
+                content=existing_readme,
+                size_bytes=len(existing_readme.encode("utf-8")),
+                is_config=False,
+            )
+        ])
+    return "|".join([
+        base_hash,
+        language,
+        include_patterns.strip(),
+        exclude_patterns.strip(),
+        "feedback" if feedback_mode else "normal",
+        quality_mode,
+        readme_hash,
+    ])
+
+
+def _get_project_analysis_schema() -> dict:
+    return ProjectAnalysis.model_json_schema()
+
+
+def _select_readme_support_files(snapshots: list[FileSnapshot], analysis: ProjectAnalysis, quality_mode: str = "balanced") -> list[FileSnapshot]:
+    selected: list[FileSnapshot] = []
+    seen: set[str] = set()
+    rel_lookup = {snap.relative_path.replace("\\", "/").lower(): snap for snap in snapshots}
+
+    def add(snapshot: FileSnapshot | None) -> None:
+        if snapshot is None:
+            return
+        if snapshot.relative_path in seen:
+            return
+        seen.add(snapshot.relative_path)
+        selected.append(snapshot)
+
+    normalized_entries = {
+        entry.replace("\\", "/").lower()
+        for entry in analysis.entry_points
+    }
+
+    candidate_paths: list[str] = []
+    for rel_path, snap in rel_lookup.items():
+        if snap.is_config:
+            candidate_paths.append(rel_path)
+            continue
+        if rel_path in normalized_entries:
+            candidate_paths.append(rel_path)
+            continue
+        if rel_path.endswith(("readme.md", "readme", "package.json", "pyproject.toml", "requirements.txt", "go.mod", "cargo.toml", "dockerfile", "docker-compose.yml", "docker-compose.yaml")):
+            candidate_paths.append(rel_path)
+            continue
+        if any(token in rel_path for token in ["routes", "router", "api", "service", "handler", "controller", "command", "cli", "main", "server", "app."]):
+            candidate_paths.append(rel_path)
+            continue
+        if rel_path.startswith(("docs/", "examples/")):
+            candidate_paths.append(rel_path)
+            continue
+
+    for rel_path in candidate_paths:
+        add(rel_lookup.get(rel_path))
+
+    if quality_mode == "high":
+        for snap in snapshots:
+            rel_path = snap.relative_path.replace("\\", "/").lower()
+            if any(segment in rel_path for segment in ["config", "settings", "schema", "model", "types", "auth", "deploy"]):
+                add(snap)
+
+    limit = 12 if quality_mode == "high" else 8
+    return selected[:limit]
 
 
 async def _analyze_snapshot_group(
@@ -109,7 +219,7 @@ async def _analyze_snapshot_group(
     existing_readme: str | None,
     language: str,
 ) -> dict:
-    selected = prioritize_group_files(group_name, snapshots, GROUP_ANALYSIS_BUDGETS.get(group_name, 3_000))
+    selected = prioritize_group_files(group_name, snapshots, GROUP_ANALYSIS_BUDGETS.get(group_name, 8_000))
     group_prompt = build_analysis_prompt(selected, existing_readme)
     instruction = GROUP_ANALYSIS_INSTRUCTIONS[group_name]["zh" if language == "zh" else "en"]
     if language == "zh":
@@ -175,12 +285,12 @@ async def _analyze_project_concurrently(
     if language == "zh":
         summary_prompt = (
             "## 分组分析结果\n" + json.dumps(merged, ensure_ascii=False, indent=2) +
-            "\n\n## 任务\n请汇总以上各组分析结果，输出统一的项目结构化结论。"
+            "\n\n## 任务\n请汇总以上各组分析结果，输出统一的项目结构化结论。不要丢掉关键架构、真实使用方式、部署和配置细节。"
         )
     else:
         summary_prompt = (
             "## Group analysis results\n" + json.dumps(merged, ensure_ascii=False, indent=2) +
-            "\n\n## Task\nConsolidate the group analysis results into a single structured project analysis."
+            "\n\n## Task\nConsolidate the group analysis results into a single structured project analysis. Preserve key architecture, real usage, deployment, and configuration details."
         )
     schema = _get_project_analysis_schema()
     system_prompt = ANALYSIS_SYSTEM_PROMPT_ZH if language == "zh" else ANALYSIS_SYSTEM_PROMPT_EN
@@ -188,43 +298,6 @@ async def _analyze_project_concurrently(
     analysis = ProjectAnalysis(**result)
     analysis.existing_readme = existing_readme
     return analysis
-
-_analysis_cache: dict[str, tuple[ProjectAnalysis, float]] = {}
-CACHE_TTL = 30 * 60  # 30 minutes
-CACHE_MAX_SIZE = 50
-
-
-def _evict_expired_cache() -> None:
-    """Remove expired entries and enforce max size."""
-    now = time.time()
-    expired = [k for k, (_, ts) in _analysis_cache.items() if now - ts >= CACHE_TTL]
-    for k in expired:
-        del _analysis_cache[k]
-    if len(_analysis_cache) > CACHE_MAX_SIZE:
-        sorted_keys = sorted(_analysis_cache, key=lambda k: _analysis_cache[k][1])
-        for k in sorted_keys[:len(_analysis_cache) - CACHE_MAX_SIZE]:
-            del _analysis_cache[k]
-
-
-def _build_analysis_cache_key(
-    snapshots: list[FileSnapshot],
-    language: str,
-    include_patterns: str = "",
-    exclude_patterns: str = "",
-    feedback_mode: bool = False,
-) -> str:
-    base_hash = compute_project_hash(snapshots)
-    return "|".join([
-        base_hash,
-        language,
-        include_patterns.strip(),
-        exclude_patterns.strip(),
-        "feedback" if feedback_mode else "normal",
-    ])
-
-
-def _get_project_analysis_schema() -> dict:
-    return ProjectAnalysis.model_json_schema()
 
 
 def build_analysis_prompt(snapshots: list[FileSnapshot], existing_readme: str | None) -> str:
@@ -249,13 +322,14 @@ def build_analysis_prompt(snapshots: list[FileSnapshot], existing_readme: str | 
         "\n## Instructions\n"
         "Extract: project name, concise description, programming languages used, "
         "all dependencies with their categories (runtime/dev/test), entry points, "
-        "key architectural patterns, and any notable features."
+        "key architectural patterns, notable features, real installation and usage flows, "
+        "deployment/configuration expectations, and the best files to use as README examples."
     )
     return "\n".join(parts)
 
 
 def build_readme_prompt(analysis: ProjectAnalysis, snapshots: list[FileSnapshot],
-                        previous_readme: str = "", feedback: str = "") -> str:
+                        previous_readme: str = "", feedback: str = "", quality_mode: str = "balanced") -> str:
     parts = ["## Project Analysis\n"]
     analysis_md = f"- **Name**: {analysis.project_name}\n"
     analysis_md += f"- **Description**: {analysis.description}\n"
@@ -267,32 +341,25 @@ def build_readme_prompt(analysis: ProjectAnalysis, snapshots: list[FileSnapshot]
         analysis_md += f"- {dep.name} ({dep.category})\n"
     parts.append(analysis_md)
 
-    entry_snippets: list[FileSnapshot] = []
-    for snap in snapshots:
-        stem = snap.relative_path.split("/")[-1].split("\\")[-1].rsplit(".", 1)[0].lower()
-        if stem in ENTRY_NAMES or snap.relative_path in analysis.entry_points:
-            entry_snippets.append(snap)
-            if len(entry_snippets) >= 3:
-                break
-
-    if entry_snippets:
-        parts.append("\n## Key Source Files (for usage examples)\n")
-        for snap in entry_snippets:
+    support_files = _select_readme_support_files(snapshots, analysis, quality_mode)
+    if support_files:
+        parts.append("\n## Representative Source Files and Docs\n")
+        line_limit = 180 if quality_mode == "high" else 120
+        for snap in support_files:
             lines = snap.content.split("\n")
-            snippet = "\n".join(lines[:80])
+            snippet = "\n".join(lines[:line_limit])
             lang = snap.language if snap.language != "unknown" else ""
             parts.append(f"### {snap.relative_path}")
             parts.append(f"```{lang}")
             parts.append(snippet)
-            if len(lines) > 80:
-                parts.append(f"... ({len(lines) - 80} more lines)")
+            if len(lines) > line_limit:
+                parts.append(f"... ({len(lines) - line_limit} more lines)")
             parts.append("```\n")
 
     if analysis.existing_readme:
         parts.append("\n## Existing README Content (preserve important parts)\n")
         parts.append(analysis.existing_readme)
 
-    # 反馈式重新生成：注入当前版本和用户反馈
     if feedback and previous_readme:
         parts.append("\n## 当前版本 README（需要根据用户反馈修订）\n")
         parts.append(previous_readme)
@@ -311,19 +378,25 @@ async def analyze_project(
     include_patterns: str = "",
     exclude_patterns: str = "",
     feedback_mode: bool = False,
+    quality_mode: str = "balanced",
 ) -> ProjectAnalysis:
-    _evict_expired_cache()
-    cache_key = _build_analysis_cache_key(
-        snapshots,
-        language,
-        include_patterns,
-        exclude_patterns,
-        feedback_mode,
-    )
-    cached = _analysis_cache.get(cache_key)
-    if cached and (time.time() - cached[1]) < CACHE_TTL:
-        await on_progress("使用缓存的分析结果...")
-        return cached[0]
+    if quality_mode != "high":
+        _evict_expired_cache()
+        cache_key = _build_analysis_cache_key(
+            snapshots,
+            language,
+            include_patterns,
+            exclude_patterns,
+            feedback_mode,
+            existing_readme,
+            quality_mode,
+        )
+        cached = _analysis_cache.get(cache_key)
+        if cached and (time.time() - cached[1]) < CACHE_TTL:
+            await on_progress("使用缓存的分析结果...")
+            return cached[0]
+    else:
+        cache_key = None
 
     await on_progress("正在分析项目结构...")
 
@@ -331,8 +404,12 @@ async def analyze_project(
         analysis = await _analyze_project_concurrently(provider, snapshots, existing_readme, on_progress, language)
     else:
         total_tokens = estimate_total_tokens(snapshots)
-        if total_tokens > 12_000:
-            snapshots = prioritize_files(snapshots, max_tokens=10_000)
+        if quality_mode == "high":
+            if total_tokens > 60_000:
+                snapshots = prioritize_files(snapshots, max_tokens=45_000)
+        else:
+            if total_tokens > 18_000:
+                snapshots = prioritize_files(snapshots, max_tokens=14_000)
 
         user_prompt = build_analysis_prompt(snapshots, existing_readme)
         schema = _get_project_analysis_schema()
@@ -342,7 +419,8 @@ async def analyze_project(
         analysis = ProjectAnalysis(**result)
         analysis.existing_readme = existing_readme
 
-    _analysis_cache[cache_key] = (analysis, time.time())
+    if cache_key:
+        _analysis_cache[cache_key] = (analysis, time.time())
     return analysis
 
 
@@ -354,7 +432,6 @@ def _build_generation_prompt(language: str, tone: str, include_badges: bool,
                               section_order: str = "", audience: str = "developer") -> str:
     base = GENERATION_SYSTEM_PROMPT_ZH if language == "zh" else GENERATION_SYSTEM_PROMPT_EN
 
-    # 语气
     tone_map = {
         "professional": {"zh": "\n- 使用专业、正式的技术文档语气", "en": "\n- Use a professional, formal technical documentation tone"},
         "casual": {"zh": "\n- 使用轻松友好的语气，适合开源社区", "en": "\n- Use a casual, friendly tone suitable for open-source communities"},
@@ -363,7 +440,6 @@ def _build_generation_prompt(language: str, tone: str, include_badges: bool,
     if tone in tone_map:
         base += tone_map[tone].get(language, tone_map[tone]["en"])
 
-    # Badge
     if not include_badges:
         badge_line = "- 添加适合该语言/生态系统的 badge" if language == "zh" else "- Badge suggestions appropriate for the language/ecosystem"
         base = base.replace(badge_line, "")
@@ -373,14 +449,12 @@ def _build_generation_prompt(language: str, tone: str, include_badges: bool,
         else:
             base += f"\n- Use {badge_style} style badges"
 
-    # 目录深度
     if toc_depth < 2:
         if language == "zh":
             base += f"\n- 目录只显示到 h{toc_depth + 1} 级标题"
         else:
             base += f"\n- Table of contents should only include h{toc_depth + 1} and above"
 
-    # 代码示例详细度
     code_map = {
         "minimal": {"zh": "\n- 代码示例保持简洁，只展示核心用法", "en": "\n- Keep code examples minimal, showing only core usage"},
         "detailed": {"zh": "\n- 代码示例要详细，包含多种场景和完整的错误处理", "en": "\n- Provide detailed code examples with multiple scenarios and error handling"},
@@ -388,21 +462,18 @@ def _build_generation_prompt(language: str, tone: str, include_badges: bool,
     if code_examples in code_map:
         base += code_map[code_examples].get(language, code_map[code_examples]["en"])
 
-    # 链接样式
     if link_style == "reference":
         if language == "zh":
             base += "\n- 使用 Markdown 引用式链接（reference-style links）"
         else:
             base += "\n- Use reference-style Markdown links"
 
-    # 章节顺序
     if section_order:
         if language == "zh":
             base += f"\n- 请按以下顺序排列章节：{section_order}"
         else:
             base += f"\n- Arrange sections in this order: {section_order}"
 
-    # 目标受众
     audience_map = {
         "user": {"zh": "\n- 面向终端用户，减少技术细节，多写使用方法和示例", "en": "\n- Target end users: reduce technical details, focus on usage and examples"},
         "contributor": {"zh": "\n- 面向贡献者，包含开发环境搭建、测试方法、提交规范", "en": "\n- Target contributors: include dev setup, testing, and contribution guidelines"},
@@ -410,7 +481,6 @@ def _build_generation_prompt(language: str, tone: str, include_badges: bool,
     if audience in audience_map:
         base += audience_map[audience].get(language, audience_map[audience]["en"])
 
-    # 自定义章节
     if custom_sections:
         if language == "zh":
             base += f"\n- 请额外包含以下章节：{custom_sections}"
@@ -452,7 +522,7 @@ async def generate_readme(
 ) -> str:
     await on_progress("正在生成 README...")
 
-    user_prompt = build_readme_prompt(analysis, snapshots, previous_readme, feedback)
+    user_prompt = build_readme_prompt(analysis, snapshots, previous_readme, feedback, quality_mode)
     system_prompt = _build_generation_prompt(
         language, tone, include_badges, custom_sections, exclude_sections, custom_prompt_suffix,
         badge_style, toc_depth, code_examples, link_style, section_order, audience,
@@ -481,6 +551,7 @@ async def run_pipeline(
     link_style: str = "inline",
     section_order: str = "",
     audience: str = "developer",
+    quality_mode: str = "balanced",
 ) -> GenerateResponse:
     await on_progress("正在校验项目路径...")
     resolved = validate_path(folder_path)
@@ -502,6 +573,7 @@ async def run_pipeline(
         include_patterns,
         exclude_patterns,
         feedback_mode=bool(feedback.strip() or previous_readme.strip()),
+        quality_mode=quality_mode,
     )
 
     readme = await generate_readme(

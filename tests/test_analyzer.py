@@ -100,7 +100,7 @@ def test_should_use_concurrent_analysis_for_large_inputs():
             size_bytes=2000,
             is_config=False,
         )
-        for i in range(12)
+        for i in range(24)
     ]
 
     assert should_use_concurrent_analysis(snapshots) is True

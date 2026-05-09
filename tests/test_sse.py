@@ -34,7 +34,7 @@ async def test_api_analyze_stops_stream_on_disconnect(monkeypatch):
     monkeypatch.setattr("app.main.get_provider", lambda *args, **kwargs: StubProvider())
     monkeypatch.setattr("app.main.run_pipeline", fake_run_pipeline)
 
-    req = AnalyzeRequest(folder_path=str(Path.cwd()), provider="ollama", model="qwen2.5:7b")
+    req = AnalyzeRequest(source_type="local_path", folder_path=str(Path.cwd()), provider="ollama", model="qwen2.5:7b")
     response = await api_analyze(req, DisconnectingRequest())
 
     chunks = []
@@ -58,7 +58,7 @@ async def test_api_analyze_emits_keep_alive_when_idle(monkeypatch):
     monkeypatch.setattr("app.main.run_pipeline", fake_run_pipeline)
     monkeypatch.setattr("app.main.SSE_HEARTBEAT_SECONDS", 0.01)
 
-    req = AnalyzeRequest(folder_path=str(Path.cwd()), provider="ollama", model="qwen2.5:7b")
+    req = AnalyzeRequest(source_type="local_path", folder_path=str(Path.cwd()), provider="ollama", model="qwen2.5:7b")
     response = await api_analyze(req, ConnectedRequest())
 
     chunks = []

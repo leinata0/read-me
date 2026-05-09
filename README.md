@@ -1,9 +1,11 @@
 # README 生成器
 
-AI 驱动的 README.md 自动生成工具。输入本地项目文件夹路径，自动遍历源码文件，分析项目的核心功能、依赖库和架构，生成排版精美的 README.md。
+AI 驱动的 README.md 自动生成工具。支持直接输入公开仓库 URL，或在需要时切换到本地项目路径模式，自动遍历源码文件，分析项目的核心功能、依赖库和架构，生成排版精美的 README.md。
 
 ## 功能特性
 
+- **仓库 URL 导入**：优先支持公开 GitHub 仓库 URL，无需先把项目手动保存到本地路径输入框
+- **本地路径补充模式**：适合分析未提交改动、本地私有代码或仅存在于本机的项目目录
 - **11 个 AI 渠道**：Anthropic、OpenAI、Gemini、DeepSeek、OpenRouter、Groq、Ollama、Moonshot、SiliconFlow、Together AI、DashScope
 - **中英双语生成**：默认中文，可切换英文
 - **丰富的生成控制**：温度、语气风格、自定义章节、Badge 开关、自定义 Prompt、文件过滤
@@ -86,19 +88,31 @@ uvicorn app.main:app --reload --port 8000
 
 打开 http://localhost:8000 ，然后：
 
-1. 输入项目文件夹路径
-2. 选择 AI 渠道和模型
-3. 点击「测试连接」验证 API Key（可选）
-4. 调整生成设置（语言、语气、温度等）
-5. 点击「生成 README」，可随时取消
-6. 如果想继续修改结果，可在下方输入反馈并点击「根据反馈重新生成」
-7. 预览、编辑、复制或下载
+### 方式一：公开仓库 URL（推荐）
+
+1. 选择“公开仓库 URL”模式
+2. 输入 GitHub 仓库 URL，例如 `https://github.com/owner/repo`
+3. 选择 AI 渠道和模型
+4. 点击「测试连接」验证 API Key（可选）
+5. 点击「生成 README」
+
+### 方式二：本地项目路径（补充模式）
+
+适合未提交改动、本地私有代码或仅存在于本机的目录：
+
+1. 切换到“本地项目路径”模式
+2. 输入实际项目文件夹路径
+3. 选择 AI 渠道和模型
+4. 点击「测试连接」验证 API Key（可选）
+5. 点击「生成 README」
+
+生成完成后，可继续输入反馈重新生成、预览、编辑、复制或下载。
 
 ## 项目架构
 
-```
+```text
 app/
-├── main.py        # FastAPI 路由、SSE 流式端点
+├── main.py        # FastAPI 路由、SSE 流式端点、仓库拉取入口
 ├── analyzer.py    # 项目遍历、路径校验、.gitignore、文件过滤
 ├── providers.py   # AI 渠道抽象层（11 个渠道 + 重试逻辑）
 ├── generator.py   # 两步 AI 管线：分析 → 生成
@@ -128,27 +142,3 @@ AI 管线分为两步：
 | SiliconFlow | Qwen/Qwen2.5-7B-Instruct | 硅基流动，国内聚合 |
 | Together AI | llama-3.1-70B-Instruct-Turbo | 海外聚合平台 |
 | DashScope | qwen-plus | 阿里云通义千问 |
-
-## 生成控制选项
-
-| 选项 | 说明 | 默认值 |
-|---|---|---|
-| 语言 | README 输出语言（中文/English） | 中文 |
-| 语气风格 | 专业正式 / 轻松友好 / 高度技术 | 专业正式 |
-| 温度 | 控制生成随机性（0.0-2.0） | 0.7 |
-| Badge | 是否生成项目 Badge | 开启 |
-| 自定义章节 | 额外添加的章节（逗号分隔） | 无 |
-| 排除章节 | 不生成的章节 | 无 |
-| 包含文件模式 | glob 模式过滤（如 `*.py,*.js`） | 全部 |
-| 排除文件模式 | glob 模式排除（如 `*.test.js,vendor/*`） | 无 |
-| 自定义 Prompt | 在生成指令末尾追加的内容 | 无 |
-
-## 技术栈
-
-- **后端**：FastAPI、Pydantic、uvicorn
-- **前端**：Pico CSS、marked.js、highlight.js、DOMPurify
-- **AI SDK**：anthropic、openai、google-genai
-
-## 许可证
-
-MIT

@@ -41,7 +41,7 @@ def test_provider_keys_clamp_limits_and_temperature():
 
 
 def test_analyze_request_trims_and_clamps_fields():
-    req = AnalyzeRequest(folder_path="  .  ", provider="  openai  ", temperature=-1, toc_depth=99, model="  qwen  ")
+    req = AnalyzeRequest(source_type="local_path", folder_path="  .  ", provider="  openai  ", temperature=-1, toc_depth=99, model="  qwen  ")
     assert req.folder_path == "."
     assert req.provider == "openai"
     assert req.temperature == 0.0
@@ -49,10 +49,19 @@ def test_analyze_request_trims_and_clamps_fields():
     assert req.model == "qwen"
 
 
-def test_test_connection_request_trims_provider_and_model():
-    req = ConnectionRequestModel(provider="  openai  ", model="  gpt-4o  ")
-    assert req.provider == "openai"
-    assert req.model == "gpt-4o"
+def test_analyze_request_requires_repo_url_for_repo_mode():
+    with pytest.raises(Exception):
+        AnalyzeRequest(source_type="repo_url", provider="openai")
+
+
+def test_analyze_request_requires_folder_path_for_local_mode():
+    with pytest.raises(Exception):
+        AnalyzeRequest(source_type="local_path", provider="openai")
+
+
+def test_analyze_request_supports_quality_mode_high():
+    req = AnalyzeRequest(source_type="local_path", folder_path=".", provider="openai", quality_mode="high")
+    assert req.quality_mode == "high"
 
 
 def test_build_readme_prompt_includes_previous_readme_and_feedback():
@@ -144,7 +153,7 @@ def test_build_readme_prompt_uses_entry_snippets_from_analysis_entry_points():
 
     prompt = build_readme_prompt(analysis, snapshots)
 
-    assert "## Key Source Files (for usage examples)" in prompt
+    assert "## Representative Source Files and Docs" in prompt
     assert "src/custom_entry.py" in prompt
 
 

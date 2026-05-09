@@ -21,7 +21,7 @@
             <strong>首次使用建议：</strong>
             <ol>
                 <li>先选择渠道并按需打开齿轮配置 API Key 或 Base URL。</li>
-                <li>输入项目路径后可先点「测试连接」确认模型可用。</li>
+                <li>优先输入公开仓库 URL；如果要分析未提交改动，再切换到本地路径模式。</li>
                 <li>生成完成后，可在下方输入反馈继续迭代当前 README。</li>
             </ol>
         </article>
@@ -30,10 +30,26 @@
         <section id="input-section" aria-labelledby="input-section-title">
             <h2 id="input-section-title" class="sr-only">README 生成输入区</h2>
             <form id="analyze-form">
-                <label for="folder-path">项目文件夹路径</label>
-                <input type="text" id="folder-path" name="folder_path"
-                       placeholder="C:\Users\...\my-project 或 /home/user/my-project" required aria-describedby="folder-path-help">
-                <small id="folder-path-help">请输入实际项目目录，避免选择个人敏感目录或纯空目录。</small>
+                <label for="source-type">项目来源</label>
+                <select id="source-type" name="source_type" aria-describedby="source-type-help">
+                    <option value="repo_url">公开仓库 URL（推荐）</option>
+                    <option value="local_path">本地项目路径</option>
+                </select>
+                <small id="source-type-help">公开仓库推荐直接输入 URL；本地路径更适合未提交改动或仅在本机存在的代码。</small>
+
+                <div id="repo-url-group">
+                    <label for="repo-url">仓库 URL</label>
+                    <input type="url" id="repo-url" name="repo_url"
+                           placeholder="https://github.com/owner/repo" required aria-describedby="repo-url-help">
+                    <small id="repo-url-help">当前优先支持 GitHub 公开仓库 URL，例如 https://github.com/owner/repo。</small>
+                </div>
+
+                <div id="folder-path-group" style="display:none">
+                    <label for="folder-path">本地项目文件夹路径</label>
+                    <input type="text" id="folder-path" name="folder_path"
+                           placeholder="C:\Users\...\my-project 或 /home/user/my-project" aria-describedby="folder-path-help">
+                    <small id="folder-path-help">请输入实际项目目录，避免选择个人敏感目录或纯空目录。</small>
+                </div>
 
                 <div class="grid">
                     <div>
@@ -229,6 +245,18 @@
                     </div>
                 </div>
                 <div class="settings-row">
+                    <div>
+                        <label for="setting-quality-mode">生成质量</label>
+                        <select id="setting-quality-mode">
+                            <option value="balanced">平衡模式</option>
+                            <option value="high">高质量模式</option>
+                        </select>
+                    </div>
+                    <div>
+                        <small>高质量模式会扩大上下文、减少裁剪，生成更慢但更完整。</small>
+                    </div>
+                </div>
+                <div class="settings-row">
                     <div class="slider-wrap">
                         <label for="setting-toc-depth">目录深度 <output id="toc-value">2</output></label>
                         <input type="range" id="setting-toc-depth" min="1" max="4" step="1" value="2">
@@ -248,11 +276,11 @@
                 <div class="settings-row">
                     <div>
                         <label for="setting-max-analyze">分析 max_tokens</label>
-                        <input type="number" id="setting-max-analyze" min="4096" max="131072" step="1024" value="16384">
+                        <input type="number" id="setting-max-analyze" min="4096" max="131072" step="1024" value="32768">
                     </div>
                     <div>
                         <label for="setting-max-generate">生成 max_tokens</label>
-                        <input type="number" id="setting-max-generate" min="4096" max="131072" step="1024" value="32768">
+                        <input type="number" id="setting-max-generate" min="4096" max="131072" step="1024" value="65536">
                     </div>
                 </div>
                 <div class="settings-row">
@@ -313,6 +341,6 @@
     <script src="https://cdn.jsdelivr.net/npm/marked@15.0.4/marked.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.6/dist/purify.min.js"></script>
     <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/highlight.min.js"></script>
-    <script src="/static/app.js?v=20260505-1"></script>
+    <script src="/static/app.js?v=20260507-repo-url"></script>
 </body>
 </html>
